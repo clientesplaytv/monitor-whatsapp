@@ -1,43 +1,35 @@
 const express = require('express');
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-// Se for usar Telegram, descomente a linha abaixo (após instalar: npm install node-telegram-bot-api)
-// const TelegramBot = require('node-telegram-bot-api'); 
+const TelegramBot = require('node-telegram-bot-api');
+
+// Configurações lidas do sistema (não do código)
+const TOKEN_TELEGRAM = process.env.TELEGRAM_TOKEN;
+const ID_TELEGRAM = process.env.TELEGRAM_CHAT_ID;
+
+const GRUPOS_PERMITIDOS = ['BAZAR TOLEDO', 'BAZAR LONDRINA', 'BAZAR CURITIBA', 'VENDAS SANTA TERESA DO OESTE', 'VENDAS REGIÃO SUL CASCAVEL', 'NEGÓCIOS CASCAVEL', 'BAZAR CASCAVEL', 'YellowBox', 'VENDAS CASCAVEL'];
 
 const app = express();
-app.get('/', (req, res) => res.send('Robô em execução'));
+app.get('/', (req, res) => res.send('Sistema Ativo'));
 app.listen(process.env.PORT || 3000);
 
-// CONFIGURAÇÃO
-const GRUPOS_PERMITIDOS = ['BAZAR TOLEDO', 'BAZAR LONDRINA', 'BAZAR CURITIBA', 'VENDAS SANTA TERESA DO OESTE', 'VENDAS REGIÃO SUL CASCAVEL', 'NEGÓCIOS CASCAVEL', 'BAZAR CASCAVEL', 'YellowBox', 'VENDAS CASCAVEL'];
-const TELEGRAM_TOKEN = 'SEU_TOKEN_AQUI'; // Coloque seu token do BotFather
-const CHAT_ID_TELEGRAM = 'SEU_ID_AQUI'; // Seu ID de chat
-
-// Iniciar bot Telegram (se configurado)
-// const botTelegram = TELEGRAM_TOKEN ? new TelegramBot(TELEGRAM_TOKEN, {polling: false}) : null;
-
+const botTelegram = TOKEN_TELEGRAM ? new TelegramBot(TOKEN_TELEGRAM, {polling: false}) : null;
 let dadosDoDia = {};
-
-async function enviarAlerta(sock, jid, userId, mensagem, nomeGrupo) {
-    // Enviar no WhatsApp
-    await sock.sendMessage(jid, { text: mensagem, mentions: [userId] });
-    console.log(`[ALERTA] ${mensagem} em ${nomeGrupo}`);
-    
-    // Enviar no Telegram (se configurado)
-    // if (botTelegram) {
-    //    botTelegram.sendMessage(CHAT_ID_TELEGRAM, `Grupo: ${nomeGrupo}\n${mensagem}`);
-    // }
-}
 
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-    const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }), browser: Browsers.macOS('Desktop') });
+    const sock = makeWASocket({
+        auth: state,
+        logger: pino({ level: 'silent' }),
+        browser: Browsers.macOS('Desktop')
+    });
 
     sock.ev.on('creds.update', saveCreds);
+
     sock.ev.on('connection.update', (update) => {
         if (update.qr) console.log("QR CODE: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(update.qr));
-        if (update.connection === 'open') console.log("✅ ROBÔ CONECTADO E PRONTO!");
+        if (update.connection === 'open') console.log("✅ ROBÔ CONECTADO!");
     });
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
@@ -56,16 +48,18 @@ async function iniciarBot() {
                 if (!dadosDoDia[userId]) dadosDoDia[userId] = 0;
                 dadosDoDia[userId]++;
                 
-                console.log(`Foto nº ${dadosDoDia[userId]} de ${userId} no grupo ${metadata.subject}`);
+                const texto = `📸 ${metadata.subject}: ${userId} enviou foto ${dadosDoDia[userId]}/10`;
+                console.log(texto);
 
-                // Lógica de Alertas
+                if (botTelegram) botTelegram.sendMessage(ID_TELEGRAM, texto).catch(e => console.log("Erro Telegram:", e));
+
                 if (dadosDoDia[userId] === 4) {
-                    await enviarAlerta(sock, msg.key.remoteJid, userId, "⚠️ Atenção: Você já realizou 4 postagens de fotos hoje.", metadata.subject);
+                    await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ Atenção: Você já realizou 4 postagens de fotos hoje.", mentions: [userId] });
                 } else if (dadosDoDia[userId] >= 10) {
-                    await enviarAlerta(sock, msg.key.remoteJid, userId, "🚨 LIMITE ATINGIDO: Você atingiu 10 postagens de fotos hoje!", metadata.subject);
+                    await sock.sendMessage(msg.key.remoteJid, { text: "🚨 LIMITE ATINGIDO: Você atingiu 10 postagens de fotos hoje!", mentions: [userId] });
                 }
             }
-        } catch (e) { console.log("Erro ao processar:", e); }
+        } catch (e) { console.log("Erro processamento:", e); }
     });
 }
 iniciarBot();
