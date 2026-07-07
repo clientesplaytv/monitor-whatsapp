@@ -8,7 +8,7 @@ app.get('/', (req, res) => res.send('Robô de Monitoramento de Fotos Ativo!'));
 app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web ativo!'));
 
 // Seu número já configurado para o robô:
-const NUMERO_DO_ROBO = "+5545998161585"; 
+const NUMERO_DO_ROBO = "5545998161585"; 
 
 let dadosDoDia = {};
 
