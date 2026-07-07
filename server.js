@@ -15,29 +15,28 @@ let dadosDoDia = {};
 async function iniciarBot() {
     console.log("--- INICIALIZANDO FUNÇÕES DO BOT ---");
     
-    // Configuração segura do Telegram
+    // Configuração Telegram
     let botTelegram = null;
-    try {
-        if (process.env.TELEGRAM_TOKEN) {
-            botTelegram = new TelegramBot(process.env.TELEGRAM_TOKEN, {polling: false});
-            console.log("✅ Telegram configurado!");
-        } else {
-            console.log("⚠️ Telegram não configurado (sem TOKEN no Render).");
-        }
-    } catch (e) {
-        console.log("❌ Erro ao configurar Telegram:", e);
+    if (process.env.TELEGRAM_TOKEN) {
+        botTelegram = new TelegramBot(process.env.TELEGRAM_TOKEN, {polling: false});
+        console.log("✅ Telegram configurado!");
     }
 
+    console.log("--- TENTANDO INICIAR CONEXÃO WHATSAPP ---");
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+    
+    // MUDANÇA IMPORTANTE: nível 'info' para vermos erros
     const sock = makeWASocket({
         auth: state,
-        logger: pino({ level: 'silent' }),
+        logger: pino({ level: 'info' }), 
         browser: Browsers.macOS('Desktop')
     });
+    console.log("--- SOCKET CRIADO ---");
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
+        console.log("Atualização de conexão:", update);
         if (update.qr) {
             console.log("--- QR CODE GERADO ---");
             console.log("https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(update.qr));
@@ -77,5 +76,4 @@ async function iniciarBot() {
         } catch (e) { console.log("Erro no processamento:", e); }
     });
 }
-
 iniciarBot().catch(e => console.log("ERRO FATAL:", e));
