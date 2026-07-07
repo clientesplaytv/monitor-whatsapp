@@ -1,47 +1,38 @@
-console.log("--- INICIANDO O SCRIPT ---");
 const express = require('express');
-const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const TelegramBot = require('node-telegram-bot-api');
 
+// --- CONFIGURAÇÕES ---
+const TELEGRAM_TOKEN = 'SEU_TOKEN_AQUI'; 
+const TELEGRAM_CHAT_ID = 'SEU_ID_AQUI'; 
+// ---------------------
+
+const GRUPOS_PERMITIDOS = [
+    'BAZAR TOLEDO', 'BAZAR LONDRINA', 'BAZAR CURITIBA', 
+    'VENDAS SANTA TERESA DO OESTE', 'VENDAS REGIÃO SUL CASCAVEL', 
+    'NEGÓCIOS CASCAVEL', 'BAZAR CASCAVEL', 'YellowBox', 'VENDAS CASCAVEL'
+];
+
 const app = express();
-app.get('/', (req, res) => res.send('Robô em execução'));
 app.listen(process.env.PORT || 3000);
 
-const GRUPOS_PERMITIDOS = ['BAZAR TOLEDO', 'BAZAR LONDRINA', 'BAZAR CURITIBA', 'VENDAS SANTA TERESA DO OESTE', 'VENDAS REGIÃO SUL CASCAVEL', 'NEGÓCIOS CASCAVEL', 'BAZAR CASCAVEL', 'YellowBox', 'VENDAS CASCAVEL'];
-let dadosDoDia = {};
+const botTelegram = new TelegramBot(TELEGRAM_TOKEN, { polling: false });
+let dados = {}; // Estrutura: { userId: { posts: 0, fotos: 0 } }
 
 async function iniciarBot() {
-    console.log("--- INICIALIZANDO FUNÇÕES DO BOT ---");
-    
-    // Configuração Telegram
-    let botTelegram = null;
-    if (process.env.TELEGRAM_TOKEN) {
-        botTelegram = new TelegramBot(process.env.TELEGRAM_TOKEN, {polling: false});
-        console.log("✅ Telegram configurado!");
-    }
-
-    console.log("--- TENTANDO INICIAR CONEXÃO WHATSAPP ---");
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-    
-    // MUDANÇA IMPORTANTE: nível 'info' para vermos erros
     const sock = makeWASocket({
         auth: state,
-        logger: pino({ level: 'info' }), 
+        logger: pino({ level: 'silent' }),
         browser: Browsers.macOS('Desktop')
     });
-    console.log("--- SOCKET CRIADO ---");
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
-        console.log("Atualização de conexão:", update);
-        if (update.qr) {
-            console.log("--- QR CODE GERADO ---");
-            console.log("https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(update.qr));
-        }
-        if (update.connection === 'open') console.log("✅ WHATSAPP CONECTADO!");
+        if (update.qr) console.log("QR:", "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(update.qr));
+        if (update.connection === 'open') console.log("✅ BOT ONLINE");
     });
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
@@ -52,28 +43,40 @@ async function iniciarBot() {
             const metadata = await sock.groupMetadata(msg.key.remoteJid);
             if (!GRUPOS_PERMITIDOS.some(t => metadata.subject.toUpperCase().includes(t.toUpperCase()))) return;
 
+            // Identifica se é imagem
             const msgType = Object.keys(msg.message)[0];
             const isImage = msgType === 'imageMessage' || (msgType === 'extendedTextMessage' && msg.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage);
 
             if (isImage) {
                 const userId = msg.key.participant || msg.key.remoteJid;
-                if (!dadosDoDia[userId]) dadosDoDia[userId] = 0;
-                dadosDoDia[userId]++;
                 
-                const texto = `📸 ${metadata.subject}: ${userId} postou a foto nº ${dadosDoDia[userId]}`;
-                console.log(texto);
+                // Inicializa se não existir
+                if (!dados[userId]) dados[userId] = { posts: 0, fotos: 0 };
 
-                if (botTelegram && process.env.TELEGRAM_CHAT_ID) {
-                    botTelegram.sendMessage(process.env.TELEGRAM_CHAT_ID, texto).catch(e => console.log("Erro Telegram:", e));
+                // Regra: Conta 1 post (mensagem) e assume 1 foto (ou ajustável se soubermos a qtd do álbum)
+                dados[userId].posts += 1;
+                dados[userId].fotos += 1; 
+
+                const { posts, fotos } = dados[userId];
+
+                // Notificação no Telegram
+                const textoAlert = `⚠️ Alerta no grupo ${metadata.subject}\nUsuário: ${userId}\nPosts hoje: ${posts}/3\nFotos hoje: ${fotos}/10`;
+                
+                // --- LÓGICA DE BLOQUEIO/AVISO ---
+                
+                // 1. Limite de Posts (3 por dia)
+                if (posts > 3) {
+                    await sock.sendMessage(msg.key.remoteJid, { text: `@${userId.split('@')[0]} você atingiu o limite de 3 postagens por dia.`, mentions: [userId] });
+                    botTelegram.sendMessage(TELEGRAM_CHAT_ID, textoAlert + "\n(Limite de POSTS atingido)");
                 }
-
-                if (dadosDoDia[userId] === 4) {
-                    await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ Atenção: Você já realizou 4 postagens de fotos hoje.", mentions: [userId] });
-                } else if (dadosDoDia[userId] >= 10) {
-                    await sock.sendMessage(msg.key.remoteJid, { text: "🚨 LIMITE ATINGIDO: Você atingiu 10 postagens de fotos hoje!", mentions: [userId] });
+                // 2. Limite de Fotos (10 por dia)
+                else if (fotos > 10) {
+                    await sock.sendMessage(msg.key.remoteJid, { text: `@${userId.split('@')[0]} você atingiu o limite de 10 fotos por dia.`, mentions: [userId] });
+                    botTelegram.sendMessage(TELEGRAM_CHAT_ID, textoAlert + "\n(Limite de FOTOS atingido)");
                 }
             }
-        } catch (e) { console.log("Erro no processamento:", e); }
+        } catch (e) { console.log("Erro:", e); }
     });
 }
-iniciarBot().catch(e => console.log("ERRO FATAL:", e));
+
+iniciarBot();
