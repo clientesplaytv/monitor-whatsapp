@@ -1,17 +1,15 @@
 {
-  "name": "monitor-whatsapp",
+  "name": "bot-moderacao-whatsapp",
   "version": "2.0.0",
-  "description": "Bot de moderação de grupos do WhatsApp",
-  "main": "server.js",
+  "main": "bot.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node bot.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.18",
-    "dotenv": "^16.4.7",
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "node-fetch": "^3.3.2",
-    "node-telegram-bot-api": "^0.66.0",
     "pino": "^9.3.2"
   }
 }
