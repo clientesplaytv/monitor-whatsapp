@@ -233,6 +233,11 @@ async function iniciarBot() {
         if (!msg.key) continue;
 
         if (!msg.message) continue;
+        // Ignora mensagens antigas ao conectar
+if (
+    msg.messageTimestamp &&
+    (Date.now()/1000 - Number(msg.messageTimestamp) > 120)
+) continue;
 
         if (msg.key.fromMe) continue;
 
@@ -270,26 +275,39 @@ async function iniciarBot() {
 
 
         // Só monitora grupos onde EU sou administrador
-        const meuJid = normalizarJid(sock.user.id);
+        const meuNumero = sock.user.id.split(":")[0];
 
-        const eu = metadata.participants.find(p =>
-            normalizarJid(p.id) === meuJid
-        );
+const eu = metadata.participants.find(p => {
 
-        if (!eu) continue;
+    return p.id.startsWith(meuNumero);
 
-        if (
-            eu.admin !== "admin" &&
-            eu.admin !== "superadmin"
-        ) {
-            continue;
-        }
+});
 
+if (!eu) {
+
+    console.log("⚠️ Não encontrei meu usuário no grupo.");
+
+    continue;
+
+}
+
+if (!["admin","superadmin"].includes(eu.admin)) {
+
+    continue;
+
+}
 
         const imagemDetectada =
             buscarImagemNaMensagem(msg.message);
 
         if (!imagemDetectada) continue;
+        // Ignora mensagens encaminhadas
+if (
+    imagemDetectada.contextInfo?.isForwarded ||
+    imagemDetectada.contextInfo?.forwardingScore > 0
+) {
+    continue;
+}
 
 
         const participanteRaw =
@@ -388,11 +406,12 @@ for (const album in registro.albuns) {
 
 }
 
-        console.log(
-
-            `📊 ${numeroUsuario} | Posts=${registro.postsFotos} | Fotos=${registro.totalFotos}`
-
-        );
+        console.log("================================");
+console.log(`👥 ${metadata.subject}`);
+console.log(`👤 ${numeroUsuario}`);
+console.log(`📸 Postagens: ${registro.postsFotos}`);
+console.log(`🖼 Fotos: ${registro.totalFotos}`);
+console.log("================================");
               // ================================
         // LIMITE DE 3 POSTAGENS
         // ================================
@@ -533,7 +552,8 @@ Ultrapassou o limite de 10 fotos no dia.`;
 
     }
 
+    });
+
 }
-  }
 
 iniciarBot();
