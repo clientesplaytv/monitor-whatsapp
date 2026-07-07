@@ -9,12 +9,16 @@ app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web Ativo!
 
 let dadosDoDia = {};
 
-// Chaves da sua Central de Alertas do Telegram
-const TELEGRAM_TOKEN = '8824919511:AAFdGX2q-ER3AvWN99e6Nv_1kjTODS9CcjI';
-const TELEGRAM_CHAT_ID = '938881162';
+// Chaves da sua Central de Alertas do Telegram (Lidas com segurança do Render)
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '938881162';
 
 // Função que faz o Telegram apitar no seu celular
 async function enviarNotificacaoTelegram(texto) {
+    if (!TELEGRAM_TOKEN) {
+        console.log("❌ Erro: TELEGRAM_TOKEN não configurado no painel do Render.");
+        return;
+    }
     try {
         const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
         await fetch(url, {
@@ -111,21 +115,17 @@ async function iniciarBot() {
                 }
                 const registro = dadosDoDia[chaveIdentificacao];
 
-                // LÓGICA DO ÁLBUM VS FOTOS CORRIDAS:
-                // Se o intervalo for maior que 2 segundos (2000ms), é uma nova postagem (foto corrida).
-                // Se for menor, vieram coladas juntas (Álbum do WhatsApp), então mantém na mesma postagem.
+                // Lógica de álbum (intervalo menor que 2 segundos mantém o mesmo post)
                 if (registro.lastPhotoTime === 0 || (agoraMili - registro.lastPhotoTime > 2000)) {
                     registro.postsFotos += 1; 
                 }
                 
-                // Atualiza o tempo da última foto recebida e soma no total absoluto do dia
                 registro.lastPhotoTime = agoraMili;
                 registro.totalFotos += 1;
 
                 const nomeDoGrupo = infoGrupo.subject || "Grupo do WhatsApp";
                 const numeroUsuario = idUsuario.split('@')[0];
 
-                // Se o número de MOMENTOS/POSTAGENS de fotos passar de 3, alerta!
                 if (registro.postsFotos > 3 && !registro.alertouPost) {
                     registro.alertouPost = true;
                     
@@ -136,7 +136,6 @@ async function iniciarBot() {
                     await enviarNotificacaoTelegram(textoAlertaTelegram);
                 }
 
-                // Limite máximo absoluto de imagens por dia (mesmo que seja em formato de álbum)
                 if (registro.totalFotos > 10 && !registro.alertouTotal) {
                     registro.alertouTotal = true;
                     
