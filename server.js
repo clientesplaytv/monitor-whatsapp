@@ -1,53 +1,111 @@
 const express = require('express');
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
+const qrcode = require('qrcode-terminal');
 
 const app = express();
-app.get('/', (req, res) => res.send('Servidor Online'));
-app.listen(process.env.PORT || 3000, () => console.log('🌐 Conexão Render Ativa'));
+app.get('/', (req, res) => res.send('Robô de Fotos Ativo via QR Code!'));
+app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web Ativo!'));
 
-// 🛑 ATENÇÃO VILMAR: Confira dígito por dígito aqui embaixo. 
-// O número precisa ter os 9 dígitos do seu celular após o DDD 45.
-const NUMERO_CORRETO = "5545998161585"; 
+let dadosDoDia = {};
+
+// Reinicia os contadores automaticamente à meia-noite
+setInterval(() => {
+    const agora = new Date();
+    const horaBr = new Date(agora.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"})).getHours();
+    const minBr = new Date(agora.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"})).getMinutes();
+    if (horaBr === 0 && minBr === 0) {
+        dadosDoDia = {};
+        console.log("🔄 Contadores zerados automaticamente!");
+    }
+}, 60000);
 
 async function iniciarBot() {
-    // Criando uma pasta inédita para zerar completamente qualquer bloqueio de cache local
-    const { state, saveCreds } = await useMultiFileAuthState('pasta_definitiva_autenticar');
+    // Criamos uma pasta inédita 'sessao_qr_definitiva' para limpar totalmente os travamentos anteriores
+    const { state, saveCreds } = await useMultiFileAuthState('sessao_qr_definitiva');
+    
+    let version = [2, 3000, 1015901307];
+    try {
+        const latest = await fetchLatestBaileysVersion();
+        if (latest && latest.version) version = latest.version;
+    } catch (e) {}
 
     const sock = makeWASocket({
+        version,
         auth: state,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: false,
-        browser: Browsers.ubuntu('Chrome')
+        printQRInTerminal: false, // Deixamos falso aqui para controlar o desenho manualmente abaixo
+        browser: Browsers.macOS('Desktop') // Simula que você está conectando por um computador Mac
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    if (!sock.authState.creds.registered) {
-        // Damos 12 segundos de espera antes de pedir o código para o WhatsApp não ativar o erro 405
-        setTimeout(async () => {
-            try {
-                let numLimpo = NUMERO_CORRETO.replace(/[^0-9]/g, '');
-                console.log(`📱 Solicitando código oficial para: ${numLimpo}`);
-                const code = await sock.requestPairingCode(numLimpo);
-                console.log(`\n🔑 SEU CÓDIGO DO CELULAR É: ${code}\n`);
-            } catch (err) {
-                console.log("⚠️ Servidor do WhatsApp recusou a geração imediata. Aguarde o tempo de segurança.");
-            }
-        }, 12000);
-    }
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
+        // 🖼️ SE O WHATSAPP ENVIAR O QR CODE, DESENHA ELE NA TELA
+        if (qr) {
+            console.log("\n==================================================");
+            console.log("📱 ABRA SEU WHATSAPP NO CELULAR E ESCANEIE ABAIXO:");
+            console.log("==================================================\n");
+            
+            qrcode.generate(qr, { small: true });
+            
+            console.log("\n==================================================");
+            console.log("Se o QR Code sumir, a página vai gerar outro logo em seguida.");
+            console.log("==================================================\n");
+        }
+
         if (connection === 'close') {
-            const codigoErro = lastDisconnect?.error?.output?.statusCode;
-            if (codigoErro !== DisconnectReason.loggedOut) {
-                console.log("🔄 Conexão oscilou. Reestabelecendo em 10 segundos...");
-                setTimeout(() => iniciarBot(), 10000);
+            const erroStatus = lastDisconnect?.error?.output?.statusCode;
+            if (erroStatus !== DisconnectReason.loggedOut) {
+                console.log("🔄 Atualizando conexão... Gerando novo QR Code...");
+                setTimeout(() => iniciarBot(), 5000);
+            } else {
+                console.log("❌ Desconectado. Apague a pasta do servidor para reiniciar.");
             }
         } else if (connection === 'open') {
-            console.log('✅ INSTALADO E CONECTADO COM SUCESSO!');
+            console.log('\n==================================================');
+            console.log('✅ CONECTADO COM SUCESSO! O ROBÔ JÁ ESTÁ RODANDO!');
+            console.log('==================================================\n');
+        }
+    });
+
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type !== 'notify') return;
+        const msg = messages[0];
+        if (msg.key.fromMe || !msg.key.remoteJid || !msg.key.remoteJid.endsWith('@g.us')) return;
+
+        const idGrupo = msg.key.remoteJid;
+        const idUsuario = msg.key.participant || msg.key.remoteJid;
+        const chaveIdentificacao = `${idGrupo}_${idUsuario}`;
+        const tipoMensagem = Object.keys(msg.message || {})[0];
+
+        if (tipoMensagem === 'imageMessage') {
+            const agoraMili = Date.now();
+            if (!dadosDoDia[chaveIdentificacao]) {
+                dadosDoDia[chaveIdentificacao] = { postsFotos: 0, totalFotos: 0, lastPhotoTime: 0, alertouPost: false, alertouTotal: false };
+            }
+            const registro = dadosDoDia[chaveIdentificacao];
+
+            if (agoraMili - registro.lastPhotoTime > 6000) {
+                registro.postsFotos += 1;
+            }
+            registro.lastPhotoTime = agoraMili;
+            registro.totalFotos += 1;
+
+            if (registro.postsFotos > 3 && !registro.alertouPost) {
+                registro.alertouPost = true;
+                const textoAlerta = `⚠️ *AVISO DE MODERAÇÃO* ⚠️\n\nO participante @${idUsuario.split('@')[0]} atingiu o limite de *3 postagens de fotos* hoje neste grupo.`;
+                await sock.sendMessage(idGrupo, { text: textoAlerta, mentions: [idUsuario] });
+            }
+
+            if (registro.totalFotos > 10 && !registro.alertouTotal) {
+                registro.alertouTotal = true;
+                const textoAlerta = `⚠️ *AVISO DE MODERAÇÃO* ⚠️\n\nO participante @${idUsuario.split('@')[0]} ultrapassou o limite de *10 fotos enviadas* hoje neste grupo.`;
+                await sock.sendMessage(idGrupo, { text: textoAlerta, mentions: [idUsuario] });
+            }
         }
     });
 }
