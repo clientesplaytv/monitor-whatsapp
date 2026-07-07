@@ -2,27 +2,24 @@ const express = require('express');
 const makeWASocket = require('@whiskeysockets/baileys').default;
 const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const qrcode = require('qrcode-terminal');
 
 const app = express();
-app.get('/', (req, res) => res.send('Robô de Fotos Ativo via QR Code!'));
+app.get('/', (req, res) => res.send('Robô Ativo!'));
 app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web Ativo!'));
 
 let dadosDoDia = {};
 
-// Reinicia os contadores automaticamente à meia-noite
 setInterval(() => {
     const agora = new Date();
     const horaBr = new Date(agora.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"})).getHours();
     const minBr = new Date(agora.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"})).getMinutes();
     if (horaBr === 0 && minBr === 0) {
         dadosDoDia = {};
-        console.log("🔄 Contadores zerados automaticamente!");
+        console.log("🔄 Contadores zerados!");
     }
 }, 60000);
 
 async function iniciarBot() {
-    // Criamos uma pasta inédita 'sessao_qr_definitiva' para limpar totalmente os travamentos anteriores
     const { state, saveCreds } = await useMultiFileAuthState('sessao_qr_definitiva');
     
     let version = [2, 3000, 1015901307];
@@ -35,8 +32,8 @@ async function iniciarBot() {
         version,
         auth: state,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: false, // Deixamos falso aqui para controlar o desenho manualmente abaixo
-        browser: Browsers.macOS('Desktop') // Simula que você está conectando por um computador Mac
+        printQRInTerminal: false,
+        browser: Browsers.macOS('Desktop')
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -44,26 +41,19 @@ async function iniciarBot() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // 🖼️ SE O WHATSAPP ENVIAR O QR CODE, DESENHA ELE NA TELA
+        // 🔗 CRIA UM LINK SEGURO COM A IMAGEM DO QR CODE PERFECT
         if (qr) {
-            console.log("\n==================================================");
-            console.log("📱 ABRA SEU WHATSAPP NO CELULAR E ESCANEIE ABAIXO:");
-            console.log("==================================================\n");
-            
-            qrcode.generate(qr, { small: true });
-            
-            console.log("\n==================================================");
-            console.log("Se o QR Code sumir, a página vai gerar outro logo em seguida.");
-            console.log("==================================================\n");
+            const linkQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
+            console.log("\n==================================================================");
+            console.log("📱 VILMAR, CLIQUE NO LINK ABAIXO PARA ABRIR O QR CODE:");
+            console.log(linkQrCode);
+            console.log("==================================================================\n");
         }
 
         if (connection === 'close') {
             const erroStatus = lastDisconnect?.error?.output?.statusCode;
             if (erroStatus !== DisconnectReason.loggedOut) {
-                console.log("🔄 Atualizando conexão... Gerando novo QR Code...");
                 setTimeout(() => iniciarBot(), 5000);
-            } else {
-                console.log("❌ Desconectado. Apague a pasta do servidor para reiniciar.");
             }
         } else if (connection === 'open') {
             console.log('\n==================================================');
