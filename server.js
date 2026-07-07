@@ -4,11 +4,35 @@ const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVer
 const pino = require('pino');
 
 const app = express();
-app.get('/', (req, res) => res.send('Robô de Fotos Ativo e Protegido!'));
+app.get('/', (req, res) => res.send('Robô de Fotos com Alerta Telegram Ativo!'));
 app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web Ativo!'));
 
 let dadosDoDia = {};
 
+// Chaves da sua Central de Alertas do Telegram
+const TELEGRAM_TOKEN = '8824919511:AAFdGX2q-ER3AvWN99e6Nv_1kjTODS9CcjI';
+const TELEGRAM_CHAT_ID = '938881162';
+
+// Função que faz o Telegram apitar no seu celular
+async function enviarNotificacaoTelegram(texto) {
+    try {
+        const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+        await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                text: texto,
+                parse_mode: 'Markdown'
+            })
+        });
+        console.log("✈️ Notificação enviada para o Telegram!");
+    } catch (erro) {
+        console.log("❌ Erro ao enviar para o Telegram:", erro);
+    }
+}
+
+// Zera os contadores à meia-noite automaticamente
 setInterval(() => {
     const agora = new Date();
     const horaBr = new Date(agora.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"})).getHours();
@@ -56,7 +80,7 @@ async function iniciarBot() {
             }
         } else if (connection === 'open') {
             console.log('\n==================================================');
-            console.log('✅ ROBÔ ATIVO E PROTEGIDO APENAS PARA GRUPOS ADMIN!');
+            console.log('✅ ROBÔ ATIVO, PROTEGIDO E INTEGRADO AO TELEGRAM!');
             console.log('==================================================\n');
         }
     });
@@ -73,17 +97,13 @@ async function iniciarBot() {
 
         if (tipoMensagem === 'imageMessage') {
             try {
-                // 🔒 TRAVA DE SEGURANÇA: Verifica se o robô é administrador deste grupo
                 const infoGrupo = await sock.groupMetadata(idGrupo);
                 const meuNumeroLimpo = sock.user.id.split(':')[0] + '@s.whatsapp.net';
                 const dadosMeusNoGrupo = infoGrupo.participants.find(p => p.id === meuNumeroLimpo);
                 
                 const souAdmin = dadosMeusNoGrupo && (dadosMeusNoGrupo.admin === 'admin' || dadosMeusNoGrupo.admin === 'superadmin');
                 
-                // Se o robô não for administrador do grupo, ele ignora a foto e não faz nada!
-                if (!souAdmin) {
-                    return; 
-                }
+                if (!souAdmin) return; 
 
                 const agoraMili = Date.now();
                 if (!dadosDoDia[chaveIdentificacao]) {
@@ -91,25 +111,43 @@ async function iniciarBot() {
                 }
                 const registro = dadosDoDia[chaveIdentificacao];
 
-                if (agoraMili - registro.lastPhotoTime > 6000) {
-                    registro.postsFotos += 1;
+                // LÓGICA DO ÁLBUM VS FOTOS CORRIDAS:
+                // Se o intervalo for maior que 2 segundos (2000ms), é uma nova postagem (foto corrida).
+                // Se for menor, vieram coladas juntas (Álbum do WhatsApp), então mantém na mesma postagem.
+                if (registro.lastPhotoTime === 0 || (agoraMili - registro.lastPhotoTime > 2000)) {
+                    registro.postsFotos += 1; 
                 }
+                
+                // Atualiza o tempo da última foto recebida e soma no total absoluto do dia
                 registro.lastPhotoTime = agoraMili;
                 registro.totalFotos += 1;
 
+                const nomeDoGrupo = infoGrupo.subject || "Grupo do WhatsApp";
+                const numeroUsuario = idUsuario.split('@')[0];
+
+                // Se o número de MOMENTOS/POSTAGENS de fotos passar de 3, alerta!
                 if (registro.postsFotos > 3 && !registro.alertouPost) {
                     registro.alertouPost = true;
-                    const textoAlerta = `⚠️ *AVISO DE MODERAÇÃO* ⚠️\n\nO participante @${idUsuario.split('@')[0]} atingiu o limite de *3 postagens de fotos* hoje neste grupo.`;
-                    await sock.sendMessage(idGrupo, { text: textoAlerta, mentions: [idUsuario] });
+                    
+                    const textoAlertaWhats = `⚠️ *AVISO DE MODERAÇÃO* ⚠️\n\nO participante @${numeroUsuario} atingiu o limite de *3 postagens de fotos* hoje neste grupo.`;
+                    await sock.sendMessage(idGrupo, { text: textoAlertaWhats, mentions: [idUsuario] });
+                    
+                    const textoAlertaTelegram = `🚨 *INFRAÇÃO NO WHATSAPP* 🚨\n\n👥 *Grupo:* ${nomeDoGrupo}\n👤 *Usuário:* \`${numeroUsuario}\`\n⚠️ *Motivo:* Postou fotos em mais de 3 momentos diferentes hoje (Fotos Corridas).`;
+                    await enviarNotificacaoTelegram(textoAlertaTelegram);
                 }
 
+                // Limite máximo absoluto de imagens por dia (mesmo que seja em formato de álbum)
                 if (registro.totalFotos > 10 && !registro.alertouTotal) {
                     registro.alertouTotal = true;
-                    const textoAlerta = `⚠️ *AVISO DE MODERAÇÃO* ⚠️\n\nO participante @${idUsuario.split('@')[0]} ultrapassou o limite de *10 fotos enviadas* hoje neste grupo.`;
-                    await sock.sendMessage(idGrupo, { text: textoAlerta, mentions: [idUsuario] });
+                    
+                    const textoAlertaWhats = `⚠️ *AVISO DE MODERAÇÃO* ⚠️\n\nO participante @${numeroUsuario} ultrapassou o limite máximo de *10 fotos no total* hoje neste grupo.`;
+                    await sock.sendMessage(idGrupo, { text: textoAlertaWhats, mentions: [idUsuario] });
+                    
+                    const textoAlertaTelegram = `🚨 *INFRAÇÃO CRÍTICA NO WHATSAPP* 🚨\n\n👥 *Grupo:* ${nomeDoGrupo}\n👤 *Usuário:* \`${numeroUsuario}\`\n⚠️ *Motivo:* Ultrapassou o limite absoluto de 10 fotos carregadas no dia.`;
+                    await enviarNotificacaoTelegram(textoAlertaTelegram);
                 }
             } catch (erro) {
-                console.log("Erro ao verificar permissões do grupo:", erro);
+                console.log("Erro ao processar moderação:", erro);
             }
         }
     });
