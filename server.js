@@ -1,6 +1,6 @@
 const express = require('express');
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
+const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 
 const app = express();
@@ -26,7 +26,21 @@ setInterval(() => {
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('pasta_autenticacao');
     
+    // 🚀 CORREÇÃO DO ERRO 405: Descobre a versão mais recente exigida pelo WhatsApp
+    console.log("🔍 Sincronizando versão do protocolo com o WhatsApp...");
+    let version = [2, 3000, 1034074495]; // Fallback estável caso a API demore a responder
+    try {
+        const latest = await fetchLatestBaileysVersion();
+        if (latest && latest.version) {
+            version = latest.version;
+            console.log(`✅ Conectando na versão oficial estável: ${version.join('.')}`);
+        }
+    } catch (e) {
+        console.log("⚠️ Não foi possível consultar a API de versão, usando o canal alternativo.");
+    }
+    
     const sock = makeWASocket({
+        version, // <-- Aplica a versão atualizada para evitar rejeição automática
         auth: state,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
@@ -35,34 +49,38 @@ async function iniciarBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Flag de controle para evitar pedidos duplicados ao mesmo tempo
     let codigoSolicitado = false;
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
-        // 🔑 EVENTO CHAVE: Só pede o código quando o WhatsApp emitir o sinal de autenticação (qr)
+        // CORREÇÃO DO ERRO 428: Aguarda o sinal de QR e dá um tempo de estabilização
         if (qr && !state.creds.registered && !codigoSolicitado) {
             codigoSolicitado = true;
             
-            // Aguarda 3 segundos regulamentares para estabilizar o canal após o sinal
+            console.log("⏳ Aguardando 5 segundos para estabilizar a precondição de rede...");
             setTimeout(async () => {
                 try {
                     let numeroLimpo = NUMERO_DO_ROBO.replace(/[^0-9]/g, '');
-                    console.log(`📱 Linha 100% pronta! Solicitando código para: ${numeroLimpo}`);
+                    console.log(`📱 Rede pronta! Solicitando código de pareamento para: ${numeroLimpo}`);
                     const codigo = await sock.requestPairingCode(numeroLimpo);
-                    console.log(`\n🔑 CÓDIGO DE PAREAMENTO: ${codigo}\n`);
+                    console.log(`\n🔑 SEU CÓDIGO DE PAREAMENTO É: ${codigo}\n`);
                 } catch (err) {
-                    console.error("❌ Erro ao gerar código:", err);
-                    codigoSolicitado = false; // Permite tentar novamente caso ocorra oscilação
+                    console.error("❌ Erro ao gerar o código:", err);
+                    codigoSolicitado = false; // Permite tentar de novo se oscilar
                 }
-            }, 3000);
+            }, 5000); 
         }
 
         if (connection === 'close') {
-            codigoSolicitado = false; // Reseta a trava ao fechar a conexão
+            codigoSolicitado = false;
             const erroStatus = lastDisconnect?.error?.output?.statusCode;
-            if (erroStatus !== DisconnectReason.loggedOut) {
+            
+            // Se cair por erro de protocolo, espera um tempo maior para não ser bloqueado por spam
+            if (erroStatus === 405 || erroStatus === 428) {
+                console.log(`⚠️ Erro temporário detectado (${erroStatus}). Aguardando 15 segundos para reiniciar com segurança...`);
+                setTimeout(() => iniciarBot(), 15000);
+            } else if (erroStatus !== DisconnectReason.loggedOut) {
                 console.log(`🔄 Conexão fechada (Status: ${erroStatus}). Reiniciando em 5 segundos...`);
                 setTimeout(() => iniciarBot(), 5000);
             }
