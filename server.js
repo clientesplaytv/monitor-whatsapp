@@ -1,27 +1,33 @@
+console.log("--- INICIANDO O SCRIPT ---");
 const express = require('express');
 const makeWASocket = require('@whiskeysockets/baileys').default;
 const { useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const TelegramBot = require('node-telegram-bot-api');
 
-const TOKEN_TELEGRAM = process.env.TELEGRAM_TOKEN;
-const ID_TELEGRAM = process.env.TELEGRAM_CHAT_ID;
-
-// Lista exata dos grupos que você quer monitorar
-const GRUPOS_PERMITIDOS = [
-    'BAZAR TOLEDO', 'BAZAR LONDRINA', 'BAZAR CURITIBA', 
-    'VENDAS SANTA TERESA DO OESTE', 'VENDAS REGIÃO SUL CASCAVEL', 
-    'NEGÓCIOS CASCAVEL', 'BAZAR CASCAVEL', 'YellowBox', 'VENDAS CASCAVEL'
-];
-
 const app = express();
 app.get('/', (req, res) => res.send('Robô em execução'));
 app.listen(process.env.PORT || 3000);
 
-const botTelegram = TOKEN_TELEGRAM ? new TelegramBot(TOKEN_TELEGRAM, {polling: false}) : null;
+const GRUPOS_PERMITIDOS = ['BAZAR TOLEDO', 'BAZAR LONDRINA', 'BAZAR CURITIBA', 'VENDAS SANTA TERESA DO OESTE', 'VENDAS REGIÃO SUL CASCAVEL', 'NEGÓCIOS CASCAVEL', 'BAZAR CASCAVEL', 'YellowBox', 'VENDAS CASCAVEL'];
 let dadosDoDia = {};
 
 async function iniciarBot() {
+    console.log("--- INICIALIZANDO FUNÇÕES DO BOT ---");
+    
+    // Configuração segura do Telegram
+    let botTelegram = null;
+    try {
+        if (process.env.TELEGRAM_TOKEN) {
+            botTelegram = new TelegramBot(process.env.TELEGRAM_TOKEN, {polling: false});
+            console.log("✅ Telegram configurado!");
+        } else {
+            console.log("⚠️ Telegram não configurado (sem TOKEN no Render).");
+        }
+    } catch (e) {
+        console.log("❌ Erro ao configurar Telegram:", e);
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
     const sock = makeWASocket({
         auth: state,
@@ -32,8 +38,11 @@ async function iniciarBot() {
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
-        if (update.qr) console.log("QR CODE: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(update.qr));
-        if (update.connection === 'open') console.log("✅ ROBÔ CONECTADO!");
+        if (update.qr) {
+            console.log("--- QR CODE GERADO ---");
+            console.log("https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" + encodeURIComponent(update.qr));
+        }
+        if (update.connection === 'open') console.log("✅ WHATSAPP CONECTADO!");
     });
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
@@ -52,20 +61,21 @@ async function iniciarBot() {
                 if (!dadosDoDia[userId]) dadosDoDia[userId] = 0;
                 dadosDoDia[userId]++;
                 
-                const texto = `📸 ${metadata.subject}: Usuário ${userId} postou a foto nº ${dadosDoDia[userId]}`;
+                const texto = `📸 ${metadata.subject}: ${userId} postou a foto nº ${dadosDoDia[userId]}`;
                 console.log(texto);
 
-                // Envia para o Telegram
-                if (botTelegram) botTelegram.sendMessage(ID_TELEGRAM, texto).catch(e => console.log("Erro Telegram:", e));
+                if (botTelegram && process.env.TELEGRAM_CHAT_ID) {
+                    botTelegram.sendMessage(process.env.TELEGRAM_CHAT_ID, texto).catch(e => console.log("Erro Telegram:", e));
+                }
 
-                // Lógica de Alertas (4 e 10)
                 if (dadosDoDia[userId] === 4) {
                     await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ Atenção: Você já realizou 4 postagens de fotos hoje.", mentions: [userId] });
                 } else if (dadosDoDia[userId] >= 10) {
                     await sock.sendMessage(msg.key.remoteJid, { text: "🚨 LIMITE ATINGIDO: Você atingiu 10 postagens de fotos hoje!", mentions: [userId] });
                 }
             }
-        } catch (e) { console.log("Erro processamento:", e); }
+        } catch (e) { console.log("Erro no processamento:", e); }
     });
 }
-iniciarBot();
+
+iniciarBot().catch(e => console.log("ERRO FATAL:", e));
