@@ -1,6 +1,5 @@
 const express = require('express');
 const makeWASocket = require('@whiskeysockets/baileys').default;
-// Reintroduzido o "Browsers" na importação para validar a conexão corretamente
 const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 
@@ -31,29 +30,37 @@ async function iniciarBot() {
         auth: state,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        browser: Browsers.ubuntu('Chrome') // Configuração oficial e estável para ambientes Linux/Render
+        browser: Browsers.ubuntu('Chrome') 
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Solicita o código de pareamento após 8 segundos (tempo ideal para o WebSocket estabilizar)
-    if (!state.creds.registered) {
-        setTimeout(async () => {
-            try {
-                let numeroLimpo = NUMERO_DO_ROBO.replace(/[^0-9]/g, '');
-                console.log(`📱 Solicitando código de pareamento para: ${numeroLimpo}`);
-                const codigo = await sock.requestPairingCode(numeroLimpo);
-                console.log(`\n🔑 CÓDIGO DE PAREAMENTO: ${codigo}\n`);
-            } catch (err) {
-                console.error("Erro ao gerar código:", err);
-            }
-        }, 8000);
-    }
+    // Flag de controle para evitar pedidos duplicados ao mesmo tempo
+    let codigoSolicitado = false;
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
         
+        // 🔑 EVENTO CHAVE: Só pede o código quando o WhatsApp emitir o sinal de autenticação (qr)
+        if (qr && !state.creds.registered && !codigoSolicitado) {
+            codigoSolicitado = true;
+            
+            // Aguarda 3 segundos regulamentares para estabilizar o canal após o sinal
+            setTimeout(async () => {
+                try {
+                    let numeroLimpo = NUMERO_DO_ROBO.replace(/[^0-9]/g, '');
+                    console.log(`📱 Linha 100% pronta! Solicitando código para: ${numeroLimpo}`);
+                    const codigo = await sock.requestPairingCode(numeroLimpo);
+                    console.log(`\n🔑 CÓDIGO DE PAREAMENTO: ${codigo}\n`);
+                } catch (err) {
+                    console.error("❌ Erro ao gerar código:", err);
+                    codigoSolicitado = false; // Permite tentar novamente caso ocorra oscilação
+                }
+            }, 3000);
+        }
+
         if (connection === 'close') {
+            codigoSolicitado = false; // Reseta a trava ao fechar a conexão
             const erroStatus = lastDisconnect?.error?.output?.statusCode;
             if (erroStatus !== DisconnectReason.loggedOut) {
                 console.log(`🔄 Conexão fechada (Status: ${erroStatus}). Reiniciando em 5 segundos...`);
@@ -76,7 +83,6 @@ async function iniciarBot() {
 
         const tipoMensagem = Object.keys(msg.message || {})[0];
 
-        // 📸 REGRA DE FOTOS (Mensagens de texto são totalmente desconsideradas)
         if (tipoMensagem === 'imageMessage') {
             const agoraMili = Date.now();
 
