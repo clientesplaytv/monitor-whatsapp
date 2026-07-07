@@ -4,14 +4,18 @@ const { useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const TelegramBot = require('node-telegram-bot-api');
 
-// Configurações lidas do sistema (não do código)
 const TOKEN_TELEGRAM = process.env.TELEGRAM_TOKEN;
 const ID_TELEGRAM = process.env.TELEGRAM_CHAT_ID;
 
-const GRUPOS_PERMITIDOS = ['BAZAR TOLEDO', 'BAZAR LONDRINA', 'BAZAR CURITIBA', 'VENDAS SANTA TERESA DO OESTE', 'VENDAS REGIÃO SUL CASCAVEL', 'NEGÓCIOS CASCAVEL', 'BAZAR CASCAVEL', 'YellowBox', 'VENDAS CASCAVEL'];
+// Lista exata dos grupos que você quer monitorar
+const GRUPOS_PERMITIDOS = [
+    'BAZAR TOLEDO', 'BAZAR LONDRINA', 'BAZAR CURITIBA', 
+    'VENDAS SANTA TERESA DO OESTE', 'VENDAS REGIÃO SUL CASCAVEL', 
+    'NEGÓCIOS CASCAVEL', 'BAZAR CASCAVEL', 'YellowBox', 'VENDAS CASCAVEL'
+];
 
 const app = express();
-app.get('/', (req, res) => res.send('Sistema Ativo'));
+app.get('/', (req, res) => res.send('Robô em execução'));
 app.listen(process.env.PORT || 3000);
 
 const botTelegram = TOKEN_TELEGRAM ? new TelegramBot(TOKEN_TELEGRAM, {polling: false}) : null;
@@ -48,11 +52,13 @@ async function iniciarBot() {
                 if (!dadosDoDia[userId]) dadosDoDia[userId] = 0;
                 dadosDoDia[userId]++;
                 
-                const texto = `📸 ${metadata.subject}: ${userId} enviou foto ${dadosDoDia[userId]}/10`;
+                const texto = `📸 ${metadata.subject}: Usuário ${userId} postou a foto nº ${dadosDoDia[userId]}`;
                 console.log(texto);
 
+                // Envia para o Telegram
                 if (botTelegram) botTelegram.sendMessage(ID_TELEGRAM, texto).catch(e => console.log("Erro Telegram:", e));
 
+                // Lógica de Alertas (4 e 10)
                 if (dadosDoDia[userId] === 4) {
                     await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ Atenção: Você já realizou 4 postagens de fotos hoje.", mentions: [userId] });
                 } else if (dadosDoDia[userId] >= 10) {
