@@ -1,43 +1,97 @@
-const { TELEGRAM_CHAT_ID, TELEGRAM_TOKEN } = require("./config");
+const { TELEGRAM_TOKEN, TELEGRAM_CHAT_ID } = require("./config");
 
-async function enviarTelegram(texto){
+async function enviarTelegram(texto) {
 
-    if(!TELEGRAM_TOKEN) return;
+    if (!TELEGRAM_TOKEN) {
+        console.log("⚠️ TELEGRAM_TOKEN não configurado.");
+        return;
+    }
 
-    try{
+    try {
 
-        await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,{
+        const resposta = await fetch(
+            `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    chat_id: TELEGRAM_CHAT_ID,
+                    text: texto,
+                    parse_mode: "Markdown"
+                })
+            }
+        );
 
-            method:"POST",
+        if (!resposta.ok) {
 
-            headers:{
-                "Content-Type":"application/json"
-            },
+            const erro = await resposta.text();
 
-            body:JSON.stringify({
+            console.log("Erro Telegram:", erro);
 
-                chat_id:TELEGRAM_CHAT_ID,
+            return;
 
-                text:texto,
+        }
 
-                parse_mode:"Markdown"
+        console.log("✅ Telegram enviado.");
 
-            })
+    } catch (erro) {
 
-        });
-
-        console.log("Telegram enviado.");
-
-    }catch(e){
-
-        console.log(e);
+        console.log("Erro Telegram:", erro.message);
 
     }
 
 }
 
-module.exports={
+async function alertaLimitePosts(grupo, usuario, numero, posts, fotos) {
 
-    enviarTelegram
+    const texto =
+`🚨 *INFRAÇÃO DETECTADA*
+
+👥 *Grupo:* ${grupo}
+
+👤 *Usuário:* ${usuario}
+
+📱 *Número:* \`${numero}\`
+
+⚠️ *Motivo:* Limite diário de postagens atingido.
+
+📝 Postagens: *${posts}*
+
+📸 Fotos: *${fotos}*`;
+
+    await enviarTelegram(texto);
+
+}
+
+async function alertaLimiteFotos(grupo, usuario, numero, posts, fotos) {
+
+    const texto =
+`🚨 *INFRAÇÃO DETECTADA*
+
+👥 *Grupo:* ${grupo}
+
+👤 *Usuário:* ${usuario}
+
+📱 *Número:* \`${numero}\`
+
+⚠️ *Motivo:* Limite diário de fotos atingido.
+
+📝 Postagens: *${posts}*
+
+📸 Fotos: *${fotos}*`;
+
+    await enviarTelegram(texto);
+
+}
+
+module.exports = {
+
+    enviarTelegram,
+
+    alertaLimitePosts,
+
+    alertaLimiteFotos
 
 };
