@@ -35,35 +35,29 @@ async function iniciarBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Lógica corrigida sem espaços no nome da variável
+    // Solicita o código de pareamento de forma segura após 10 segundos da criação do socket
     if (!state.creds.registered) {
-        let codigoGeradoComSucesso = false;
-
-        const solicitarCodigoComFailsafe = async () => {
-            if (codigoGeradoComSucesso) return;
+        setTimeout(async () => {
             try {
                 let numeroLimpo = NUMERO_DO_ROBO.replace(/[^0-9]/g, '');
-                console.log(`📱 Conectando aos servidores do WhatsApp para: ${numeroLimpo}...`);
+                console.log(`📱 Solicitando código de pareamento para: ${numeroLimpo}`);
                 const codigo = await sock.requestPairingCode(numeroLimpo);
                 console.log(`\n🔑 CÓDIGO DE PAREAMENTO: ${codigo}\n`);
-                codigoGeradoComSucesso = true;
             } catch (err) {
-                console.log("⏳ O WhatsApp ainda está estabelecendo a linha segura... Tentando gerar o código novamente em 10 segundos.");
-                setTimeout(solicitarCodigoComFailsafe, 10000);
+                console.log("⏳ Servidor sincronizando rede... O código será gerado na próxima tentativa estável.");
             }
-        };
-
-        // Aguarda 15 segundos iniciais para o Render se estabilizar na rede antes do primeiro pedido
-        setTimeout(solicitarCodigoComFailsafe, 15000);
+        }, 10000);
     }
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
+        
         if (connection === 'close') {
-            const deveReiniciar = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (deveReiniciar) {
-                console.log('🔄 Conexão fechada. Reiniciando o robô...');
-                iniciarBot();
+            const erroStatus = lastDisconnect?.error?.output?.statusCode;
+            if (erroStatus !== DisconnectReason.loggedOut) {
+                // Adiciona um intervalo de 5 segundos antes de reiniciar para evitar loops instantâneos
+                console.log(`🔄 Conexão fechada (Status: ${erroStatus}). Reiniciando em 5 segundos...`);
+                setTimeout(() => iniciarBot(), 5000);
             }
         } else if (connection === 'open') {
             console.log('✅ Conectado ao WhatsApp com sucesso! Monitorando grupos...');
