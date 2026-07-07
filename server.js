@@ -4,7 +4,7 @@ const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVer
 const pino = require('pino');
 
 const app = express();
-app.get('/', (req, res) => res.send('Robô Ativo!'));
+app.get('/', (req, res) => res.send('Robô de Fotos Ativo e Protegido!'));
 app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web Ativo!'));
 
 let dadosDoDia = {};
@@ -15,7 +15,7 @@ setInterval(() => {
     const minBr = new Date(agora.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"})).getMinutes();
     if (horaBr === 0 && minBr === 0) {
         dadosDoDia = {};
-        console.log("🔄 Contadores zerados!");
+        console.log("🔄 Contadores zerados automaticamente!");
     }
 }, 60000);
 
@@ -41,11 +41,10 @@ async function iniciarBot() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // 🔗 CRIA UM LINK SEGURO COM A IMAGEM DO QR CODE PERFECT
         if (qr) {
             const linkQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
             console.log("\n==================================================================");
-            console.log("📱 VILMAR, CLIQUE NO LINK ABAIXO PARA ABRIR O QR CODE:");
+            console.log("📱 SE RECONECTAR FOR NECESSÁRIO, ACESSE O LINK:");
             console.log(linkQrCode);
             console.log("==================================================================\n");
         }
@@ -57,7 +56,7 @@ async function iniciarBot() {
             }
         } else if (connection === 'open') {
             console.log('\n==================================================');
-            console.log('✅ CONECTADO COM SUCESSO! O ROBÔ JÁ ESTÁ RODANDO!');
+            console.log('✅ ROBÔ ATIVO E PROTEGIDO APENAS PARA GRUPOS ADMIN!');
             console.log('==================================================\n');
         }
     });
@@ -73,28 +72,44 @@ async function iniciarBot() {
         const tipoMensagem = Object.keys(msg.message || {})[0];
 
         if (tipoMensagem === 'imageMessage') {
-            const agoraMili = Date.now();
-            if (!dadosDoDia[chaveIdentificacao]) {
-                dadosDoDia[chaveIdentificacao] = { postsFotos: 0, totalFotos: 0, lastPhotoTime: 0, alertouPost: false, alertouTotal: false };
-            }
-            const registro = dadosDoDia[chaveIdentificacao];
+            try {
+                // 🔒 TRAVA DE SEGURANÇA: Verifica se o robô é administrador deste grupo
+                const infoGrupo = await sock.groupMetadata(idGrupo);
+                const meuNumeroLimpo = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+                const dadosMeusNoGrupo = infoGrupo.participants.find(p => p.id === meuNumeroLimpo);
+                
+                const souAdmin = dadosMeusNoGrupo && (dadosMeusNoGrupo.admin === 'admin' || dadosMeusNoGrupo.admin === 'superadmin');
+                
+                // Se o robô não for administrador do grupo, ele ignora a foto e não faz nada!
+                if (!souAdmin) {
+                    return; 
+                }
 
-            if (agoraMili - registro.lastPhotoTime > 6000) {
-                registro.postsFotos += 1;
-            }
-            registro.lastPhotoTime = agoraMili;
-            registro.totalFotos += 1;
+                const agoraMili = Date.now();
+                if (!dadosDoDia[chaveIdentificacao]) {
+                    dadosDoDia[chaveIdentificacao] = { postsFotos: 0, totalFotos: 0, lastPhotoTime: 0, alertouPost: false, alertouTotal: false };
+                }
+                const registro = dadosDoDia[chaveIdentificacao];
 
-            if (registro.postsFotos > 3 && !registro.alertouPost) {
-                registro.alertouPost = true;
-                const textoAlerta = `⚠️ *AVISO DE MODERAÇÃO* ⚠️\n\nO participante @${idUsuario.split('@')[0]} atingiu o limite de *3 postagens de fotos* hoje neste grupo.`;
-                await sock.sendMessage(idGrupo, { text: textoAlerta, mentions: [idUsuario] });
-            }
+                if (agoraMili - registro.lastPhotoTime > 6000) {
+                    registro.postsFotos += 1;
+                }
+                registro.lastPhotoTime = agoraMili;
+                registro.totalFotos += 1;
 
-            if (registro.totalFotos > 10 && !registro.alertouTotal) {
-                registro.alertouTotal = true;
-                const textoAlerta = `⚠️ *AVISO DE MODERAÇÃO* ⚠️\n\nO participante @${idUsuario.split('@')[0]} ultrapassou o limite de *10 fotos enviadas* hoje neste grupo.`;
-                await sock.sendMessage(idGrupo, { text: textoAlerta, mentions: [idUsuario] });
+                if (registro.postsFotos > 3 && !registro.alertouPost) {
+                    registro.alertouPost = true;
+                    const textoAlerta = `⚠️ *AVISO DE MODERAÇÃO* ⚠️\n\nO participante @${idUsuario.split('@')[0]} atingiu o limite de *3 postagens de fotos* hoje neste grupo.`;
+                    await sock.sendMessage(idGrupo, { text: textoAlerta, mentions: [idUsuario] });
+                }
+
+                if (registro.totalFotos > 10 && !registro.alertouTotal) {
+                    registro.alertouTotal = true;
+                    const textoAlerta = `⚠️ *AVISO DE MODERAÇÃO* ⚠️\n\nO participante @${idUsuario.split('@')[0]} ultrapassou o limite de *10 fotos enviadas* hoje neste grupo.`;
+                    await sock.sendMessage(idGrupo, { text: textoAlerta, mentions: [idUsuario] });
+                }
+            } catch (erro) {
+                console.log("Erro ao verificar permissões do grupo:", erro);
             }
         }
     });
