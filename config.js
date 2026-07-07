@@ -12,6 +12,8 @@ module.exports = {
 
     LIMITE_FOTOS: 10,
 
-    TEMPO_ALBUM: 2000
+    TEMPO_ALBUM: 2000,
+
+    TIMEZONE: "America/Sao_Paulo"
 
 };
