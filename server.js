@@ -4,19 +4,18 @@ const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVer
 const pino = require('pino');
 
 const app = express();
-app.get('/', (req, res) => res.send('Robô de Fotos com Alerta Telegram Ativo!'));
-app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web Ativo!'));
+app.get('/', (req, res) => res.send('Robô de Fotos de Alta Precisão Ativo!'));
+app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web Operacional!'));
 
 let dadosDoDia = {};
 
-// Chaves da sua Central de Alertas do Telegram (Lidas com segurança do Render)
+// Configuração segura das credenciais do Telegram obtidas do painel do Render
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '938881162';
 
-// Função que faz o Telegram apitar no seu celular
 async function enviarNotificacaoTelegram(texto) {
     if (!TELEGRAM_TOKEN) {
-        console.log("❌ Erro: TELEGRAM_TOKEN não configurado no painel do Render.");
+        console.log("❌ Erro de Configuração: TELEGRAM_TOKEN não foi encontrado no painel do Render.");
         return;
     }
     try {
@@ -30,22 +29,34 @@ async function enviarNotificacaoTelegram(texto) {
                 parse_mode: 'Markdown'
             })
         });
-        console.log("✈️ Notificação enviada para o Telegram!");
+        console.log("✈️ [TELEGRAM] Notificação de infração enviada com sucesso!");
     } catch (erro) {
-        console.log("❌ Erro ao enviar para o Telegram:", erro);
+        console.log("❌ [TELEGRAM] Erro crítico ao disparar mensagem para o Telegram:", erro);
     }
 }
 
-// Zera os contadores à meia-noite automaticamente
+// Reinicialização automática de contadores à meia-noite (Horário de Brasília)
 setInterval(() => {
     const agora = new Date();
     const horaBr = new Date(agora.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"})).getHours();
     const minBr = new Date(agora.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"})).getMinutes();
     if (horaBr === 0 && minBr === 0) {
         dadosDoDia = {};
-        console.log("🔄 Contadores zerados automaticamente!");
+        console.log("🔄 [SISTEMA] Virada de dia detectada. Todos os contadores foram zerados!");
     }
 }, 60000);
+
+// Auxiliar técnico: Vasculha todas as estruturas internas do WhatsApp em busca da imagem
+function extrairObjetoImagem(msg) {
+    if (!msg.message) return null;
+    const m = msg.message;
+    if (m.imageMessage) return m.imageMessage;
+    if (m.viewOnceMessage?.message?.imageMessage) return m.viewOnceMessage.message.imageMessage;
+    if (m.viewOnceMessageV2?.message?.imageMessage) return m.viewOnceMessageV2.message.imageMessage;
+    if (m.ephemeralMessage?.message?.imageMessage) return m.ephemeralMessage.message.imageMessage;
+    if (m.documentWithCaptionMessage?.message?.imageMessage) return m.documentWithCaptionMessage.message.imageMessage;
+    return null;
+}
 
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('sessao_qr_definitiva');
@@ -72,7 +83,7 @@ async function iniciarBot() {
         if (qr) {
             const linkQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`;
             console.log("\n==================================================================");
-            console.log("📱 SE RECONECTAR FOR NECESSÁRIO, ACESSE O LINK:");
+            console.log("📱 NOVO QR CODE GERADO DA CONEXÃO:");
             console.log(linkQrCode);
             console.log("==================================================================\n");
         }
@@ -84,48 +95,64 @@ async function iniciarBot() {
             }
         } else if (connection === 'open') {
             console.log('\n==================================================');
-            console.log('✅ ROBÔ ATIVO, PROTEGIDO E INTEGRADO AO TELEGRAM!');
+            console.log('✅ MONITOR CONECTADO COM SUCESSO E AGUARDANDO IMAGENS!');
             console.log('==================================================\n');
         }
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
-        const msg = messages[0];
-        if (msg.key.fromMe || !msg.key.remoteJid || !msg.key.remoteJid.endsWith('@g.us')) return;
 
-        const idGrupo = msg.key.remoteJid;
-        const idUsuario = msg.key.participant || msg.key.remoteJid;
-        const chaveIdentificacao = `${idGrupo}_${idUsuario}`;
-        const tipoMensagem = Object.keys(msg.message || {})[0];
+        for (const msg of messages) {
+            // Ignora se a mensagem veio do próprio robô ou se não for de um chat de grupo
+            if (msg.key.fromMe) continue;
+            if (!msg.key.remoteJid || !msg.key.remoteJid.endsWith('@g.us')) continue;
 
-        if (tipoMensagem === 'imageMessage') {
+            // Executa a extração profunda para ver se há imagem na mensagem atual
+            const imagemValida = extrairObjetoImagem(msg);
+            if (!imagemValida) continue;
+
+            const idGrupo = msg.key.remoteJid;
+            const idUsuario = msg.key.participant || msg.key.remoteJid;
+            const numeroUsuario = idUsuario.split('@')[0];
+
+            console.log(`\n📸 [LOG] Imagem identificada! Enviada por: @${numeroUsuario} no ID de grupo: ${idGrupo}`);
+
             try {
+                console.log(`👑 [LOG] Consultando metadados do grupo para verificar permissões...`);
                 const infoGrupo = await sock.groupMetadata(idGrupo);
+                const nomeDoGrupo = infoGrupo.subject || "Grupo do WhatsApp";
+                
                 const meuNumeroLimpo = sock.user.id.split(':')[0] + '@s.whatsapp.net';
                 const dadosMeusNoGrupo = infoGrupo.participants.find(p => p.id === meuNumeroLimpo);
-                
                 const souAdmin = dadosMeusNoGrupo && (dadosMeusNoGrupo.admin === 'admin' || dadosMeusNoGrupo.admin === 'superadmin');
                 
-                if (!souAdmin) return; 
+                if (!souAdmin) {
+                    console.log(`⚠️ [IGNORADO] A imagem foi detectada, mas o robô NÃO disparou o alerta porque tiraram o Admin dele no grupo: ${nomeDoGrupo}`);
+                    continue;
+                }
 
+                const chaveIdentificacao = `${idGrupo}_${idUsuario}`;
                 const agoraMili = Date.now();
+                
                 if (!dadosDoDia[chaveIdentificacao]) {
                     dadosDoDia[chaveIdentificacao] = { postsFotos: 0, totalFotos: 0, lastPhotoTime: 0, alertouPost: false, alertouTotal: false };
                 }
                 const registro = dadosDoDia[chaveIdentificacao];
 
-                // Lógica de álbum (intervalo menor que 2 segundos mantém o mesmo post)
+                // Regra Inteligente de Tempo (Tolerância Exata de 2 Segundos)
                 if (registro.lastPhotoTime === 0 || (agoraMili - registro.lastPhotoTime > 2000)) {
-                    registro.postsFotos += 1; 
+                    registro.postsFotos += 1;
+                    console.log(`📌 [CONTAGEM] Foto isolada detetada. Novo Post contabilizado para @${numeroUsuario}. Total de posts: ${registro.postsFotos}`);
+                } else {
+                    console.log(`📦 [ÁLBUM DETECTADO] Fotos coladas em lote. Mantendo o mesmo número de postagem para @${numeroUsuario}.`);
                 }
-                
+
                 registro.lastPhotoTime = agoraMili;
                 registro.totalFotos += 1;
+                console.log(`📊 [STATUS ATUAL] @${numeroUsuario} já enviou hoje -> Momentos/Posts: ${registro.postsFotos} | Total absoluto de fotos: ${registro.totalFotos}`);
 
-                const nomeDoGrupo = infoGrupo.subject || "Grupo do WhatsApp";
-                const numeroUsuario = idUsuario.split('@')[0];
-
+                // Verificação e disparo do limite de blocos de postagem (Mais de 3 posts)
                 if (registro.postsFotos > 3 && !registro.alertouPost) {
                     registro.alertouPost = true;
                     
@@ -134,8 +161,10 @@ async function iniciarBot() {
                     
                     const textoAlertaTelegram = `🚨 *INFRAÇÃO NO WHATSAPP* 🚨\n\n👥 *Grupo:* ${nomeDoGrupo}\n👤 *Usuário:* \`${numeroUsuario}\`\n⚠️ *Motivo:* Postou fotos em mais de 3 momentos diferentes hoje (Fotos Corridas).`;
                     await enviarNotificacaoTelegram(textoAlertaTelegram);
+                    console.log(`🚨 [ALERTA ACIONADO] Mensagens de infração enviadas para o WhatsApp e Telegram de @${numeroUsuario}`);
                 }
 
+                // Verificação e disparo do limite absoluto de mídias no dia (Mais de 10 fotos)
                 if (registro.totalFotos > 10 && !registro.alertouTotal) {
                     registro.alertouTotal = true;
                     
@@ -144,9 +173,11 @@ async function iniciarBot() {
                     
                     const textoAlertaTelegram = `🚨 *INFRAÇÃO CRÍTICA NO WHATSAPP* 🚨\n\n👥 *Grupo:* ${nomeDoGrupo}\n👤 *Usuário:* \`${numeroUsuario}\`\n⚠️ *Motivo:* Ultrapassou o limite absoluto de 10 fotos carregadas no dia.`;
                     await enviarNotificacaoTelegram(textoAlertaTelegram);
+                    console.log(`🚨 [ALERTA CRÍTICO ACIONADO] Limite diário de 10 fotos estourado por @${numeroUsuario}`);
                 }
+
             } catch (erro) {
-                console.log("Erro ao processar moderação:", erro);
+                console.log("❌ [ERRO] Falha interna crítica ao processar regras ou checar permissões do grupo:", erro);
             }
         }
     });
