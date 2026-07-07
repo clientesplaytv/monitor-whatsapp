@@ -1,6 +1,7 @@
 const express = require('express');
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+// Reintroduzido o "Browsers" na importação para validar a conexão corretamente
+const { useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 
 const app = express();
@@ -11,7 +12,6 @@ app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web ativo!
 const NUMERO_DO_ROBO = "554598161585"; 
 
 let dadosDoDia = {};
-let linkTimeout = null; // Variável global para rastrear e destruir agendadores fantasmas
 
 // Reinicia os contadores automaticamente à meia-noite (Horário de Brasília)
 setInterval(() => {
@@ -25,58 +25,41 @@ setInterval(() => {
 }, 60000);
 
 async function iniciarBot() {
-    // 🔥 LIMPEZA DE SEGURANÇA: Se houver algum agendador antigo rodando na memória, cancela ele imediatamente
-    if (linkTimeout) {
-        clearTimeout(linkTimeout);
-        linkTimeout = null;
-    }
-
     const { state, saveCreds } = await useMultiFileAuthState('pasta_autenticacao');
     
     const sock = makeWASocket({
         auth: state,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        browser: ['Ubuntu', 'Chrome', '110.0.0.0']
+        browser: Browsers.ubuntu('Chrome') // Configuração oficial e estável para ambientes Linux/Render
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Solicita o código de pareamento de forma limpa após 10 segundos da rede ativa
+    // Solicita o código de pareamento após 8 segundos (tempo ideal para o WebSocket estabilizar)
     if (!state.creds.registered) {
-        linkTimeout = setTimeout(async () => {
+        setTimeout(async () => {
             try {
                 let numeroLimpo = NUMERO_DO_ROBO.replace(/[^0-9]/g, '');
                 console.log(`📱 Solicitando código de pareamento para: ${numeroLimpo}`);
                 const codigo = await sock.requestPairingCode(numeroLimpo);
                 console.log(`\n🔑 CÓDIGO DE PAREAMENTO: ${codigo}\n`);
             } catch (err) {
-                console.log("⏳ Sincronizando canais de rede... Aguardando próxima janela estável.");
+                console.error("Erro ao gerar código:", err);
             }
-        }, 10000);
+        }, 8000);
     }
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         
         if (connection === 'close') {
-            // 🔥 Se a conexão caiu, cancela o agendador atual para evitar requisições duplicadas
-            if (linkTimeout) {
-                clearTimeout(linkTimeout);
-                linkTimeout = null;
-            }
-
             const erroStatus = lastDisconnect?.error?.output?.statusCode;
             if (erroStatus !== DisconnectReason.loggedOut) {
-                console.log(`🔄 Linha liberada (Status: ${erroStatus}). Aguardando 5 segundos para reiniciar de forma limpa...`);
+                console.log(`🔄 Conexão fechada (Status: ${erroStatus}). Reiniciando em 5 segundos...`);
                 setTimeout(() => iniciarBot(), 5000);
             }
         } else if (connection === 'open') {
-            // Se conectou com sucesso, destrói o timer por garantia de que não vai disparar nada extra
-            if (linkTimeout) {
-                clearTimeout(linkTimeout);
-                linkTimeout = null;
-            }
             console.log('✅ Conectado ao WhatsApp com sucesso! Monitorando grupos...');
         }
     });
