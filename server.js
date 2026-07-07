@@ -11,6 +11,7 @@ app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web ativo!
 const NUMERO_DO_ROBO = "554598161585"; 
 
 let dadosDoDia = {};
+let linkTimeout = null; // Variável global para rastrear e destruir agendadores fantasmas
 
 // Reinicia os contadores automaticamente à meia-noite (Horário de Brasília)
 setInterval(() => {
@@ -24,6 +25,12 @@ setInterval(() => {
 }, 60000);
 
 async function iniciarBot() {
+    // 🔥 LIMPEZA DE SEGURANÇA: Se houver algum agendador antigo rodando na memória, cancela ele imediatamente
+    if (linkTimeout) {
+        clearTimeout(linkTimeout);
+        linkTimeout = null;
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState('pasta_autenticacao');
     
     const sock = makeWASocket({
@@ -35,16 +42,16 @@ async function iniciarBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Solicita o código de pareamento de forma segura após 10 segundos da criação do socket
+    // Solicita o código de pareamento de forma limpa após 10 segundos da rede ativa
     if (!state.creds.registered) {
-        setTimeout(async () => {
+        linkTimeout = setTimeout(async () => {
             try {
                 let numeroLimpo = NUMERO_DO_ROBO.replace(/[^0-9]/g, '');
                 console.log(`📱 Solicitando código de pareamento para: ${numeroLimpo}`);
                 const codigo = await sock.requestPairingCode(numeroLimpo);
                 console.log(`\n🔑 CÓDIGO DE PAREAMENTO: ${codigo}\n`);
             } catch (err) {
-                console.log("⏳ Servidor sincronizando rede... O código será gerado na próxima tentativa estável.");
+                console.log("⏳ Sincronizando canais de rede... Aguardando próxima janela estável.");
             }
         }, 10000);
     }
@@ -53,13 +60,23 @@ async function iniciarBot() {
         const { connection, lastDisconnect } = update;
         
         if (connection === 'close') {
+            // 🔥 Se a conexão caiu, cancela o agendador atual para evitar requisições duplicadas
+            if (linkTimeout) {
+                clearTimeout(linkTimeout);
+                linkTimeout = null;
+            }
+
             const erroStatus = lastDisconnect?.error?.output?.statusCode;
             if (erroStatus !== DisconnectReason.loggedOut) {
-                // Adiciona um intervalo de 5 segundos antes de reiniciar para evitar loops instantâneos
-                console.log(`🔄 Conexão fechada (Status: ${erroStatus}). Reiniciando em 5 segundos...`);
+                console.log(`🔄 Linha liberada (Status: ${erroStatus}). Aguardando 5 segundos para reiniciar de forma limpa...`);
                 setTimeout(() => iniciarBot(), 5000);
             }
         } else if (connection === 'open') {
+            // Se conectou com sucesso, destrói o timer por garantia de que não vai disparar nada extra
+            if (linkTimeout) {
+                clearTimeout(linkTimeout);
+                linkTimeout = null;
+            }
             console.log('✅ Conectado ao WhatsApp com sucesso! Monitorando grupos...');
         }
     });
