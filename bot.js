@@ -99,8 +99,7 @@ function encontrarImagem(obj){
 async function iniciarBot(){
 
 
-    const { state, saveCreds } =
-        await useMultiFileAuthState("./sessao");
+    const { state, saveCreds } = await useMultiFileAuthState("./auth");
 
 
 
