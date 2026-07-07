@@ -1,14 +1,17 @@
 {
-  "name": "bot-whatsapp-telegram",
-  "version": "1.0.0",
+  "name": "monitor-whatsapp",
+  "version": "2.0.0",
+  "description": "Bot de moderação de grupos do WhatsApp",
   "main": "server.js",
-  "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.8",
-    "express": "^4.18.2",
-    "pino": "^8.16.2",
-    "node-telegram-bot-api": "^0.64.0"
-  },
   "scripts": {
     "start": "node server.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "dotenv": "^16.4.7",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "node-telegram-bot-api": "^0.66.0",
+    "pino": "^9.3.2"
   }
 }
