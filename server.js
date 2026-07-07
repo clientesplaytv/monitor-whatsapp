@@ -3,11 +3,11 @@ const makeWASocket = require('@whiskeysockets/baileys').default;
 const { useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 
-const app = report || express();
-app.get('/', (req, res) => res.send('Robô de Monitoramento Ativo!'));
-app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor Web ativo!'));
+const app = express();
+app.get('/', (req, res) => res.send('Robô de Alertas Ativo!'));
+app.listen(process.env.PORT || 3000, () => console.log('🌐 Servidor ativo!'));
 
-// Voltando para o seu número padrão de 12 dígitos que estava antes
+// ⚠️ VILMAR: Se no seu perfil do WhatsApp tiver o "9" na frente, mude aqui para "5545998161585" (13 dígitos)
 const NUMERO_DO_ROBO = "554598161585"; 
 
 let dadosDoDia = {};
@@ -18,45 +18,46 @@ setInterval(() => {
     const minBr = new Date(agora.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"})).getMinutes();
     if (horaBr === 0 && minBr === 0) {
         dadosDoDia = {};
-        console.log("🔄 Contadores diários zerados!");
+        console.log("🔄 Contadores zerados!");
     }
 }, 60000);
 
 async function iniciarBot() {
-    // 🌟 MUDANÇA CRUCIAL: Alterado o nome da pasta para 'sessao_nova_limpa' 
-    // Isso obriga o servidor a deletar o cache antigo e gerar um código de pareamento do zero!
-    const { state, saveCreds } = await useMultiFileAuthState('sessao_nova_limpa');
+    // Mudamos o nome da pasta para forçar o Render a esquecer os erros anteriores e começar do zero
+    const { state, saveCreds } = await useMultiFileAuthState('sessao_whatsapp_valida');
     
-    let version = [2, 3000, 1034074495]; 
+    // Força o robô a usar a versão mais recente do WhatsApp para corrigir o erro 428 (Precondition Required)
+    console.log("🔄 Sincronizando versão do WhatsApp...");
+    let version = [2, 3000, 1015901307];
     try {
         const latest = await fetchLatestBaileysVersion();
-        if (latest && latest.version) {
-            version = latest.version;
-        }
+        if (latest && latest.version) version = latest.version;
     } catch (e) {}
-    
+
     const sock = makeWASocket({
-        version, 
+        version,
         auth: state,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        browser: Browsers.ubuntu('Chrome') 
+        browser: Browsers.ubuntu('Chrome')
     });
 
     sock.ev.on('creds.update', saveCreds);
 
     if (!sock.authState.creds.registered) {
+        // Aguarda 8 segundos para a conexão estabilizar antes de pedir o código (evita erro 405)
         setTimeout(async () => {
             try {
                 let numLimpo = NUMERO_DO_ROBO.replace(/[^0-9]/g, '');
+                console.log(`📱 Solicitando código para o número: ${numLimpo}`);
                 const code = await sock.requestPairingCode(numLimpo);
                 console.log("\n==================================================");
-                console.log(`🔑 SEU NOVO CÓDIGO DE PAREAMENTO REAL É: ${code}`);
+                console.log(`🔑 SEU CÓDIGO DE PAREAMENTO É: ${code}`);
                 console.log("==================================================\n");
             } catch (err) {
-                console.log("❌ Erro ao gerar código.");
+                console.log("⚠️ Aguardando estabilização da rede para gerar o código...");
             }
-        }, 5000); // 5 segundos para a rede estabilizar antes de pedir o código
+        }, 8000);
     }
 
     sock.ev.on('connection.update', async (update) => {
@@ -64,13 +65,16 @@ async function iniciarBot() {
 
         if (connection === 'close') {
             const erroStatus = lastDisconnect?.error?.output?.statusCode;
-            if (erroStatus === 405 || erroStatus === 428) {
-                setTimeout(() => iniciarBot(), 10000);
+            
+            // Tratamento inteligente para os erros que vimos nos seus prints
+            if (erroStatus === 428 || erroStatus === 405) {
+                console.log("🔄 Servidor do WhatsApp pediu uma pausa. Reconectando em 15 segundos...");
+                setTimeout(() => iniciarBot(), 15000);
             } else if (erroStatus !== DisconnectReason.loggedOut) {
                 setTimeout(() => iniciarBot(), 5000);
             }
         } else if (connection === 'open') {
-            console.log('✅ CONECTADO COM SUCESSO!');
+            console.log('✅ CONECTADO COM SUCESSO AO WHATSAPP!');
         }
     });
 
@@ -81,7 +85,7 @@ async function iniciarBot() {
 
         const idGrupo = msg.key.remoteJid;
         const idUsuario = msg.key.participant || msg.key.remoteJid;
-        const chaveIdentificacao = `${idGrupo}_${idUsuario}`; 
+        const chaveIdentificacao = `${idGrupo}_${idUsuario}`;
         const tipoMensagem = Object.keys(msg.message || {})[0];
 
         if (tipoMensagem === 'imageMessage') {
