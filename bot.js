@@ -11,13 +11,14 @@ const {
     fetchLatestBaileysVersion
 } = require("@whiskeysockets/baileys");
 
-const app = express();
+const app = report => express();
+const server = express();
 
-app.get("/", (req, res) => {
+server.get("/", (req, res) => {
     res.send("Monitor WhatsApp v2 Online");
 });
 
-app.listen(process.env.PORT || 3000, () => {
+server.listen(process.env.PORT || 3000, () => {
     console.log("🌐 Servidor Express iniciado. Iniciando o Bot...");
     iniciarBot(); 
 });
@@ -85,19 +86,15 @@ function normalizarJid(jid){
     return numero + "@" + dominio;
 }
 
-// Compara os membros usando canais normais e a nova criptografia LID
 function somosOMesmo(jidMembro, jidBot, lidBot) {
     if (!jidMembro) return false;
-    
     const idMembroLimpo = jidMembro.split("@")[0].split(":")[0];
 
-    // 1. Se o membro do grupo for um LID mascarado, compara com o LID do Bot
     if (jidMembro.includes("@lid") && lidBot) {
         const idLidBotLimpo = lidBot.split("@")[0].split(":")[0];
         return idMembroLimpo === idLidBotLimpo;
     }
     
-    // 2. Fallback tradicional por número de telefone
     if (!jidBot) return false;
     const idBotLimpo = jidBot.split("@")[0].split(":")[0];
     
@@ -116,7 +113,6 @@ function somosOMesmo(jidMembro, jidBot, lidBot) {
     return (finalM === finalB && dddM === dddB);
 }
 
-// Varre a mensagem recursivamente para achar mídias
 function buscarImagem(obj){
     if(!obj) return null;
     if(typeof obj !== "object") return null;
@@ -138,9 +134,7 @@ async function iniciarBot(){
     try{
         const latest = await fetchLatestBaileysVersion();
         if(latest?.version) version = latest.version;
-    } catch(err) {
-        console.log("⚠️ Usando versão padrão estável do Baileys.");
-    }
+    } catch(err) {}
 
     const sock = makeWASocket({
         version,
@@ -157,19 +151,14 @@ async function iniciarBot(){
 
     sock.ev.on("connection.update", async (update) => {
         const { connection, qr, lastDisconnect } = update;
-
         if (qr) {
-            console.log("\n⚠️ [QR CODE GERADO] Acesse o link abaixo para escanear:");
-            console.log(`https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(qr)}\n`);
+            console.log(`\n⚠️ [QR CODE] https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(qr)}\n`);
         }
         if (connection === "open") console.log("✅ WhatsApp conectado com sucesso!");
         if (connection === "close") {
             const erro = lastDisconnect?.error?.output?.statusCode;
             if (erro !== DisconnectReason.loggedOut) {
-                console.log("🔄 Reconectando em 5 segundos...");
                 setTimeout(iniciarBot, 5000);
-            } else {
-                console.log("🎯 Desconectado permanentemente. Apague a pasta 'sessao' e escaneie de novo.");
             }
         }
     });
@@ -193,33 +182,14 @@ async function iniciarBot(){
                 continue;
             }
 
-            // 🔐 EXTRAÇÃO MÚLTIPLA DE IDENTIDADE (Pega Número Real e Código LID Secundário)
             let meuJid = sock.user?.id || sock.user?.jid || state?.creds?.me?.id;
             let meuLid = sock.user?.lid || state?.creds?.me?.lid;
 
-            // Procura o bot usando os dois parâmetros possíveis de comparação
             const eu = metadata.participants.find(p => somosOMesmo(p.id, meuJid, meuLid));
+            if (!eu || (eu.admin !== "admin" && eu.admin !== "superadmin")) continue;
 
-            if (!eu) {
-                console.log(`\n======================================================`);
-                console.log(`🚨 ERRO: BOT NÃO FOI ACHADO EM "${metadata.subject}"`);
-                console.log(`🤖 Número Real do Bot: ${meuJid}`);
-                console.log(`🆔 ID Virtual (LID) do Bot: ${meuLid || "Não capturado. APAGUE A PASTA 'SESSAO' E RE-ESCANEIE O QR CODE!"}`);
-                console.log(`🔎 Membros no grupo: ${metadata.participants.length} (Eles estão mascarados como @lid)`);
-                console.log(`======================================================\n`);
-                continue;
-            }
-
-            // ✅ REGRA: Ler apenas grupos em que você é administrador
-            if (eu.admin !== "admin" && eu.admin !== "superadmin") {
-                console.log(`⚠️ O bot não é administrador no grupo: ${metadata.subject}. Ignorando.`);
-                continue; 
-            }
-
-            // ✅ REGRA: Detectar fotos normais, temporárias e view-once
             const imagem = buscarImagem(msg.message);
             if (!imagem) continue;
-
             if (imagem.contextInfo?.isForwarded || imagem.contextInfo?.forwardingScore > 0) continue;
 
             const participanteRaw = msg.key.participant;
@@ -230,15 +200,13 @@ async function iniciarBot(){
             const chave = `${idGrupo}_${numeroUsuario}`;
 
             if (!dadosDoDia[chave]) {
-                dadosDoDia[chave] = { postsFotos: 0, totalFotos: 0, alertouPost: false, alertouTotal: false, albuns: {} };
+                dadosDoDia[chave] = { postsFotos: 0, totalFotos: 0, alertouPost: false, alertouTotal: false, albuns: {}, timeoutId: null };
             }
 
             const registro = dadosDoDia[chave];
             registro.totalFotos++;
 
-            // ✅ REGRA: Contar álbuns como uma única postagem
             const idAlbum = imagem.contextInfo?.mediaGroupId || imagem.contextInfo?.messageSecret || null;
-
             if (!idAlbum) {
                 registro.postsFotos++;
             } else {
@@ -248,31 +216,44 @@ async function iniciarBot(){
                 }
             }
 
-            console.log(`📸 [FOTO DETECTADA] Grupo: ${metadata.subject} | De: ${numeroUsuario} | Posts: ${registro.postsFotos} | Total: ${registro.totalFotos}`);
+            console.log(`📸 [FOTO ACUMULADA] ${metadata.subject} | De: ${numeroUsuario} | Posts: ${registro.postsFotos} | Total: ${registro.totalFotos}`);
 
-            // ✅ REGRA: Alerta de 3 postagens
-            if (registro.postsFotos >= 3 && !registro.alertouPost) {
-                registro.alertouPost = true;
-                const textoGrupo = `⚠️ *AVISO DE MODERAÇÃO*\n\n@${numeroUsuario}\n\nVocê atingiu o limite diário de *3 postagens de fotos* neste grupo.\n\nAguarde até amanhã para realizar novas publicações.`;
-                try {
-                    await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] });
-                } catch (erro) {}
+            // =================================================================
+            // ⏳ SISTEMA DE DEBOUNCE (ESPERA O ÁLBUM CONCLUIR PARA AVALIAR)
+            // =================================================================
+            if (registro.timeoutId) clearTimeout(registro.timeoutId);
 
-                const textoTelegram = `🚨 *INFRAÇÃO WHATSAPP*\n\n👥 *Grupo:* ${metadata.subject}\n👤 *Usuário:* ${numeroUsuario}\n📸 *Postagens:* ${registro.postsFotos}\n⚠️ *Motivo:* Ultrapassou limite de 3 posts de fotos.`;
-                await enviarTelegram(textoTelegram);
-            }
+            registro.timeoutId = setTimeout(async () => {
+                
+                // 1º CENÁRIO CRÍTICO: Estourou o limite de 10 fotos no total
+                if (registro.totalFotos >= 10 && !registro.alertouTotal) {
+                    registro.alertouTotal = true;
+                    registro.alertouPost = true; // Silencia o alerta menor de postagens
 
-            // ✅ REGRA: Alerta de 10 fotos
-            if (registro.totalFotos >= 10 && !registro.alertouTotal) {
-                registro.alertouTotal = true;
-                const textoGrupo = `🚫 *LIMITE DE FOTOS ATINGIDO*\n\n@${numeroUsuario}\n\nVocê atingiu o limite diário de *10 fotos* neste grupo.`;
-                try {
-                    await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] });
-                } catch (erro) {}
+                    const textoGrupo = `🚫 *LIMITE DIÁRIO EXCEDIDO*\n───── ✧ ─────\n\n👤 @${numeroUsuario}\n\n⚠️ *Atenção:* Você ultrapassou o teto de *10 fotos* permitidas por dia!\n\n❌ As fotos enviadas acima do limite permitido devem ser *APAGADAS IMEDIATAMENTE* por você.\n\n📱 O não cumprimento desta diretriz resultará na sua remoção automática deste grupo.\n\n🕛 Novas postagens estarão liberadas apenas amanhã.`;
+                    
+                    try {
+                        await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] });
+                    } catch (erro) {}
 
-                const textoTelegram = `🚨 *INFRAÇÃO CRÍTICA*\n\n👥 *Grupo:* ${metadata.subject}\n👤 *Usuário:* ${numeroUsuario}\n🖼 *Total de Fotos:* ${registro.totalFotos}\n⚠️ *Motivo:* Ultrapassou limite diário de 10 fotos.`;
-                await enviarTelegram(textoTelegram);
-            }
+                    const textoTelegram = `🚨 *INFRAÇÃO CRÍTICA*\n\n👥 *Grupo:* ${metadata.subject}\n👤 *Usuário:* ${numeroUsuario}\n🖼 *Total de Fotos:* ${registro.totalFotos}\n⚠️ *Motivo:* Ultrapassou limite diário de 10 fotos.`;
+                    await enviarTelegram(textoTelegram);
+
+                // 2º CENÁRIO: Atingiu as 3 postagens normais (e não estourou as 10 fotos)
+                } else if (registro.postsFotos >= 3 && !registro.alertouPost && registro.totalFotos < 10) {
+                    registro.alertouPost = true;
+
+                    const textoGrupo = `⚠️ *AVISO DE MODERAÇÃO*\n───── ✧ ─────\n\n👤 @${numeroUsuario}\n\n📌 Você atingiu o limite de *3 postagens* de fotos hoje.\n\n📸 Mesmo que não tenha atingido o total de 10 fotos individuais, *novas postagens estão suspensas por hoje*.\n\n🕛 Por favor, aguarde até amanhã para publicar novamente.\n\n📋 *Diretrizes do Grupo:*\n• Máximo de 3 postagens por dia OU até 10 fotos no total.`;
+                    
+                    try {
+                        await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] });
+                    } catch (erro) {}
+
+                    const textoTelegram = `🚨 *INFRAÇÃO WHATSAPP*\n\n👥 *Grupo:* ${metadata.subject}\n👤 *Usuário:* ${numeroUsuario}\n📸 *Postagens:* ${registro.postsFotos}\n⚠️ *Motivo:* Ultrapassou limite de 3 posts de fotos.`;
+                    await enviarTelegram(textoTelegram);
+                }
+
+            }, 3000); // Aguarda 3 segundos de silêncio para garantir o fim do upload do lote de fotos
         }
     });
 }
