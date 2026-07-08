@@ -11,14 +11,13 @@ const {
     fetchLatestBaileysVersion
 } = require("@whiskeysockets/baileys");
 
-const app = report => express();
-const server = express();
+const app = express();
 
-server.get("/", (req, res) => {
+app.get("/", (req, res) => {
     res.send("Monitor WhatsApp v2 Online");
 });
 
-server.listen(process.env.PORT || 3000, () => {
+app.listen(process.env.PORT || 3000, () => {
     console.log("🌐 Servidor Express iniciado. Iniciando o Bot...");
     iniciarBot(); 
 });
@@ -199,61 +198,97 @@ async function iniciarBot(){
             const numeroUsuario = idUsuario.split("@")[0];
             const chave = `${idGrupo}_${numeroUsuario}`;
 
+            // Inicialização estruturada de contadores e travas de alertas individuais
             if (!dadosDoDia[chave]) {
-                dadosDoDia[chave] = { postsFotos: 0, totalFotos: 0, alertouPost: false, alertouTotal: false, albuns: {}, timeoutId: null };
+                dadosDoDia[chave] = { 
+                    postsFotos: 0, 
+                    totalFotos: 0, 
+                    alertouPostAtingido: false, 
+                    alertouPostExcedido: false, 
+                    alertouFotoAtingido: false, 
+                    alertouFotoExcedido: false,
+                    fotosDesteBurst: 0,
+                    naEscuta: false,
+                    timeoutId: null 
+                };
             }
 
             const registro = dadosDoDia[chave];
-            registro.totalFotos++;
 
-            const idAlbum = imagem.contextInfo?.mediaGroupId || imagem.contextInfo?.messageSecret || null;
-            if (!idAlbum) {
-                registro.postsFotos++;
-            } else {
-                if (!registro.albuns[idAlbum]) {
-                    registro.postsFotos++;
-                    registro.albuns[idAlbum] = Date.now();
-                }
+            // Ativa a janela de escuta para acumular o lote/álbum
+            if (!registro.naEscuta) {
+                registro.naEscuta = true;
+                registro.fotosDesteBurst = 0;
             }
+            registro.fotosDesteBurst++;
 
-            console.log(`📸 [FOTO ACUMULADA] ${metadata.subject} | De: ${numeroUsuario} | Posts: ${registro.postsFotos} | Total: ${registro.totalFotos}`);
-
-            // =================================================================
-            // ⏳ SISTEMA DE DEBOUNCE (ESPERA O ÁLBUM CONCLUIR PARA AVALIAR)
-            // =================================================================
             if (registro.timeoutId) clearTimeout(registro.timeoutId);
 
+            // Aguarda 3 segundos de silêncio para consolidar o envio completo do usuário
             registro.timeoutId = setTimeout(async () => {
-                
-                // 1º CENÁRIO CRÍTICO: Estourou o limite de 10 fotos no total
-                if (registro.totalFotos >= 10 && !registro.alertouTotal) {
-                    registro.alertouTotal = true;
-                    registro.alertouPost = true; // Silencia o alerta menor de postagens
+                const fotosNoLote = registro.fotosDesteBurst;
+                registro.naEscuta = false;
+                registro.fotosDesteBurst = 0;
 
-                    const textoGrupo = `🚫 *LIMITE DIÁRIO EXCEDIDO*\n───── ✧ ─────\n\n👤 @${numeroUsuario}\n\n⚠️ *Atenção:* Você ultrapassou o teto de *10 fotos* permitidas por dia!\n\n❌ As fotos enviadas acima do limite permitido devem ser *APAGADAS IMEDIATAMENTE* por você.\n\n📱 O não cumprimento desta diretriz resultará na sua remoção automática deste grupo.\n\n🕛 Novas postagens estarão liberadas apenas amanhã.`;
-                    
-                    try {
-                        await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] });
-                    } catch (erro) {}
+                // 🔄 CORREÇÃO: Independente de quantas fotos vieram no lote (álbum), conta estritamente como 1 única postagem
+                registro.postsFotos += 1;
+                registro.totalFotos += fotosNoLote;
 
-                    const textoTelegram = `🚨 *INFRAÇÃO CRÍTICA*\n\n👥 *Grupo:* ${metadata.subject}\n👤 *Usuário:* ${numeroUsuario}\n🖼 *Total de Fotos:* ${registro.totalFotos}\n⚠️ *Motivo:* Ultrapassou limite diário de 10 fotos.`;
-                    await enviarTelegram(textoTelegram);
+                console.log(`📊 [BALANÇO CONSOLIDADO] Grupo: ${metadata.subject} | Usuário: ${numeroUsuario} | Posts: ${registro.postsFotos} | Fotos: ${registro.totalFotos}`);
 
-                // 2º CENÁRIO: Atingiu as 3 postagens normais (e não estourou as 10 fotos)
-                } else if (registro.postsFotos >= 3 && !registro.alertouPost && registro.totalFotos < 10) {
-                    registro.alertouPost = true;
+                // =================================================================
+                // ⚖️ SISTEMA DE DECISÃO HIERÁRQUICA DE ALERTAS (ELEGÂNTE E SEM DUPLICIDADE)
+                // =================================================================
 
-                    const textoGrupo = `⚠️ *AVISO DE MODERAÇÃO*\n───── ✧ ─────\n\n👤 @${numeroUsuario}\n\n📌 Você atingiu o limite de *3 postagens* de fotos hoje.\n\n📸 Mesmo que não tenha atingido o total de 10 fotos individuais, *novas postagens estão suspensas por hoje*.\n\n🕛 Por favor, aguarde até amanhã para publicar novamente.\n\n📋 *Diretrizes do Grupo:*\n• Máximo de 3 postagens por dia OU até 10 fotos no total.`;
-                    
-                    try {
-                        await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] });
-                    } catch (erro) {}
+                // 🛑 CATEGORIA 1: CRÍTICA DE FOTOS
+                if (registro.totalFotos > 10) {
+                    if (!registro.alertouFotoExcedido) {
+                        registro.alertouFotoExcedido = true;
+                        registro.alertouFotoAtingido = true; // Seta trava anterior para evitar conflito retrógrado
+                        registro.alertouPostExcedido = true;
+                        registro.alertouPostAtingido = true;
 
-                    const textoTelegram = `🚨 *INFRAÇÃO WHATSAPP*\n\n👥 *Grupo:* ${metadata.subject}\n👤 *Usuário:* ${numeroUsuario}\n📸 *Postagens:* ${registro.postsFotos}\n⚠️ *Motivo:* Ultrapassou limite de 3 posts de fotos.`;
-                    await enviarTelegram(textoTelegram);
+                        const textoGrupo = `🚨 *LIMITE DE FOTOS EXCEDIDO*\n\n👤 @${numeroUsuario}\n\n⛔ *ATENÇÃO CRÍTICA:* Você ultrapassou o teto de *10 fotos* permitidas por dia!\n\n❌ As fotos enviadas acima do limite devem ser *APAGADAS IMEDIATAMENTE* por você.\n\n⚠️ O descumprimento das diretrizes poderá resultar na sua remoção do grupo.\n\n🕛 Aguarde até amanhã para realizar novas postagens.`;
+                        
+                        try { await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] }); } catch (e) {}
+                        await enviarTelegram(`🚨 *EXCEDIDO:* Usuário ${numeroUsuario} postou mais de 10 fotos no grupo ${metadata.subject}. Total: ${registro.totalFotos}`);
+                    }
+                } 
+                else if (registro.totalFotos === 10) {
+                    if (!registro.alertouFotoAtingido) {
+                        registro.alertouFotoAtingido = true;
+                        registro.alertouPostAtingido = true;
+
+                        const textoGrupo = `⚠️ *AVISO DE MODERAÇÃO*\n\n👤 @${numeroUsuario}\n\n📸 Você atingiu o limite exato de *10 fotos* hoje.\n\n🚫 *Atenção:* Sua cota de mídias diárias acabou. *Não envie mais nenhuma foto hoje* neste grupo.\n\n🕛 Aguarde a renovação do contador à meia-noite.`;
+                        
+                        try { await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] }); } catch (e) {}
+                        await enviarTelegram(`⚠️ *LIMITE ATINGIDO:* Usuário ${numeroUsuario} atingiu 10 fotos no grupo ${metadata.subject}.`);
+                    }
+                }
+                // 📌 CATEGORIA 2: MODERAÇÃO DE POSTAGENS (SÓ DISPARA SE AS FOTOS ESTIVEREM ABAIXO DE 10)
+                else if (registro.postsFotos > 3) {
+                    if (!registro.alertouPostExcedido) {
+                        registro.alertouPostExcedido = true;
+                        registro.alertouPostAtingido = true;
+
+                        const textoGrupo = `🚨 *LIMITE DE POSTAGENS EXCEDIDO*\n\n👤 @${numeroUsuario}\n\n⛔ *ATENÇÃO:* Você ultrapassou o limite de *3 postagens* diárias!\n\n❌ Esta publicação excedente deve ser *APAGADA IMEDIATAMENTE* por você para manter a organização do chat.\n\n⚠️ Evite punições ou remoção do grupo respeitando as regras.`;
+                        
+                        try { await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] }); } catch (e) {}
+                        await enviarTelegram(`🚨 *EXCEDIDO:* Usuário ${numeroUsuario} fez a postagem nº ${registro.postsFotos} no grupo ${metadata.subject}.`);
+                    }
+                } 
+                else if (registro.postsFotos === 3) {
+                    if (!registro.alertouPostAtingido) {
+                        registro.alertouPostAtingido = true;
+
+                        const textoGrupo = `⚠️ *AVISO DE MODERAÇÃO*\n\n👤 @${numeroUsuario}\n\n📌 Você atingiu o limite diário de *3 postagens* neste grupo.\n\n🚫 Mesmo que você ainda não tenha atingido 10 fotos individuais, *novas postagens estão suspensas por hoje*.\n\n🕛 Por favor, colabore e aguarde até amanhã para voltar a publicar.`;
+                        
+                        try { await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] }); } catch (e) {}
+                        await enviarTelegram(`⚠️ *LIMITE ATINGIDO:* Usuário ${numeroUsuario} atingiu 3 postagens de fotos no grupo ${metadata.subject}.`);
+                    }
                 }
 
-            }, 3000); // Aguarda 3 segundos de silêncio para garantir o fim do upload do lote de fotos
+            }, 3000);
         }
     });
 }
