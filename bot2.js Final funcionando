@@ -40,7 +40,8 @@ async function enviarTelegram(texto) {
     const data = JSON.stringify({
         chat_id: TELEGRAM_CHAT_ID,
         text: texto,
-        parse_mode: "Markdown"
+        parse_mode: "Markdown",
+        disable_web_page_preview: true
     });
 
     const options = {
@@ -84,7 +85,8 @@ setInterval(async () => {
         for (const [chave, dados] of Object.entries(dadosDoDia)) {
             if (dados.alertouPostExcedido || dados.alertouFotoExcedido) {
                 const [idGrupo, numeroUsuario] = chave.split("_");
-                relatorio += `👤 *Usuário:* ${numeroUsuario}\n`;
+                relatorio += `👤 *Membro:* ${dados.nomeUsuario}\n`;
+                relatorio += `📱 *ID/Número:* [${numeroUsuario}](https://wa.me/${numeroUsuario})\n`;
                 relatorio += `📸 *Posts:* ${dados.postsFotos} | 🖼 *Fotos:* ${dados.totalFotos}\n`;
                 relatorio += `⚠️ *Infração:* ${dados.alertouFotoExcedido ? 'Excedeu 10 fotos' : 'Excedeu 3 posts'}\n\n`;
                 infratores++;
@@ -221,13 +223,15 @@ async function iniciarBot(){
             const participanteRaw = msg.key.participant;
             if (!participanteRaw) continue;
 
+            // Captura o nome de perfil da pessoa
+            const nomeUsuario = msg.pushName || "Usuário Desconhecido";
             const idUsuario = normalizarJid(participanteRaw);
             const numeroUsuario = idUsuario.split("@")[0];
             const chave = `${idGrupo}_${numeroUsuario}`;
 
-            // Removemos as travas de "atingido" para deixar o código mais limpo e ágil
             if (!dadosDoDia[chave]) {
                 dadosDoDia[chave] = { 
+                    nomeUsuario: nomeUsuario,
                     postsFotos: 0, 
                     totalFotos: 0, 
                     alertouPostExcedido: false, 
@@ -256,19 +260,21 @@ async function iniciarBot(){
                 registro.postsFotos += 1;
                 registro.totalFotos += fotosNoLote;
 
-                console.log(`📊 [BALANÇO CONSOLIDADO] Grupo: ${metadata.subject} | Usuário: ${numeroUsuario} | Posts: ${registro.postsFotos} | Fotos: ${registro.totalFotos}`);
+                console.log(`📊 [BALANÇO CONSOLIDADO] Grupo: ${metadata.subject} | Usuário: ${registro.nomeUsuario} | Posts: ${registro.postsFotos} | Fotos: ${registro.totalFotos}`);
 
                 // 🛑 CATEGORIA 1: CRÍTICA DE FOTOS (Somente ao passar de 10)
                 if (registro.totalFotos > 10) {
                     if (!registro.alertouFotoExcedido) {
                         registro.alertouFotoExcedido = true;
-                        registro.alertouPostExcedido = true; // Impede que o aviso de posts venha junto
+                        registro.alertouPostExcedido = true; 
 
                         const textoGrupo = `🚨 *LIMITE DE FOTOS EXCEDIDO*\n\n👤 @${numeroUsuario}\n\n⛔ *ATENÇÃO CRÍTICA:* Você ultrapassou o teto de *10 fotos* permitidas por dia!\n\n❌ As fotos enviadas acima do limite devem ser *APAGADAS IMEDIATAMENTE* por você.\n\n⚠️ O descumprimento das diretrizes poderá resultar na sua remoção do grupo.\n\n🕛 Aguarde até amanhã para realizar novas postagens.`;
                         
                         try { await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] }); } catch (e) {}
                         
-                        await enviarTelegram(`🚨 *EXCEDIDO:* Usuário ${numeroUsuario} postou mais de 10 fotos no grupo ${metadata.subject}. Total: ${registro.totalFotos}`);
+                        // Telegram formatado com Nome Capturado
+                        const alertaTelegram = `💥 *GRUPO:* ${metadata.subject}\n\n🚨 *LIMITE DE FOTOS EXCEDIDO*\n\n👤 *Membro:* ${registro.nomeUsuario}\n📱 *Número/ID:* [${numeroUsuario}](https://wa.me/${numeroUsuario})\n📸 *Total enviado:* ${registro.totalFotos} mídias.`;
+                        await enviarTelegram(alertaTelegram);
                     }
                 } 
                 // 📌 CATEGORIA 2: MODERAÇÃO DE POSTAGENS (Somente ao passar de 3)
@@ -276,11 +282,13 @@ async function iniciarBot(){
                     if (!registro.alertouPostExcedido) {
                         registro.alertouPostExcedido = true;
 
-                        const textoGrupo = `🚨 *LIMITE DE POSTAGENS EXCEDIDO*\n\n👤 @${numeroUsuario}\n\n⛔ *ATENÇÃO:* Você ultrapassou o limite de *3 postagens* diárias!\n\n❌ Esta publicação excedente deve ser *APAGADA IMEDIATAMENTE* por você para manter a organização do chat.\n\n⚠️ Evite punições ou remoção do grupo respeitando as regras.`;
+                        const textoGrupo = `🚨 *LIMITE DE POSTAGENS EXCEDIDO*\n\n👤 @${numeroUsuario}\n\n⛔ *ATENÇÃO:* Você ultrapassou o limite de *3 postagens* diárias!\n\n❌ Esta publicação excedente deve ser *APAGADA IMEDIATAMENTE* por você para manter a organização do chat.\n\n⚠️ Evite punições ou remoção do grupo respeitando as regras.\n\n🕛 Aguarde até amanhã para voltar a publicar.`;
                         
                         try { await sock.sendMessage(idGrupo, { text: textoGrupo, mentions: [idUsuario] }); } catch (e) {}
                         
-                        await enviarTelegram(`🚨 *EXCEDIDO:* Usuário ${numeroUsuario} fez a postagem excedente nº ${registro.postsFotos} no grupo ${metadata.subject}.`);
+                        // Telegram formatado com Nome Capturado
+                        const alertaTelegram = `💥 *GRUPO:* ${metadata.subject}\n\n🚨 *LIMITE DE POSTAGENS EXCEDIDO*\n\n👤 *Membro:* ${registro.nomeUsuario}\n📱 *Número/ID:* [${numeroUsuario}](https://wa.me/${numeroUsuario})\n📝 *Infração:* Fez a postagem excedente nº ${registro.postsFotos}.`;
+                        await enviarTelegram(alertaTelegram);
                     }
                 }
 
